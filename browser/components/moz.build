@@ -34,6 +34,7 @@ DIRS += [
     "asrouter",
     "attribution",
     "backup",
+    "cast",
     "contentanalysis",
     "contextualidentity",
     "customizableui",

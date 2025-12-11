@@ -36,6 +36,9 @@ document.addEventListener(
           case "Browser:SendLink":
             MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
             break;
+          case "Browser:CastTab":
+            gCastUI.openPanel();
+            break;
           case "cmd_pageSetup":
             PrintUtils.showPageSetup();
             break;

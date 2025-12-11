@@ -51,6 +51,10 @@
   list-style-image: url("chrome://browser/skin/bookmark-star-on-tray.svg");
 }
 
+#cast-button {
+  list-style-image: url("chrome://browser/skin/icons/cast.svg");
+}
+
 #history-panelmenu {
   list-style-image: url("chrome://browser/skin/history.svg");
 }
