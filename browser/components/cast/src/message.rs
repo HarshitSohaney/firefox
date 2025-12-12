@@ -1,6 +1,29 @@
 use prost::Message;
 
-include!(concat!(env!("OUT_DIR"), "/extensions.api.cast_channel.rs"));
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
+pub enum PayloadType {
+    String = 0,
+    Binary = 1,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct CastMessage {
+    #[prost(int32, required, tag = "1")]
+    pub protocol_version: i32,
+    #[prost(string, required, tag = "2")]
+    pub source_id: String,
+    #[prost(string, required, tag = "3")]
+    pub destination_id: String,
+    #[prost(string, required, tag = "4")]
+    pub namespace: String,
+    #[prost(enumeration = "i32", required, tag = "5")]
+    pub payload_type: i32,
+    #[prost(string, optional, tag = "6")]
+    pub payload_utf8: Option<String>,
+    #[prost(bytes, optional, tag = "7")]
+    pub payload_binary: Option<Vec<u8>>,
+}
 
 impl CastMessage {
     pub fn new(
@@ -10,11 +33,11 @@ impl CastMessage {
         payload_json: String,
     ) -> Self {
         CastMessage {
-            protocol_version: "CASTV2-1-0".to_string(),
+            protocol_version: 0,
             source_id,
             destination_id,
             namespace,
-            payload_type: PayloadType::String.into(),
+            payload_type: PayloadType::String as i32,
             payload_utf8: Some(payload_json),
             payload_binary: None,
         }

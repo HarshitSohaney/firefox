@@ -16,6 +16,7 @@ extern crate bitsdownload;
 extern crate bookmark_sync;
 extern crate buildid_reader_ffi;
 extern crate cascade_bloom_filter;
+extern crate cast;
 extern crate cert_storage;
 extern crate chardetng_c;
 extern crate cosec;

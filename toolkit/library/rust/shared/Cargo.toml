@@ -89,6 +89,8 @@ signature_cache = { path = "../../../../security/certverifier/signature_cache" }
 
 mime-guess-ffi = { path = "../../../../dom/fs/parent/rust/mime-guess-ffi" }
 
+cast = { path = "../../../../browser/components/cast" }
+
 # Note: `modern_sqlite` means rusqlite's bindings file be for a sqlite with
 # version less than or equal to what we link to. This isn't a problem because we
 # tend to keep this up to date, but it needs to be taken into consideration when

@@ -1,5 +1,5 @@
 use crate::message::CastMessage;
-use crate::handlers::{ConnectionHandler, HeartbeatHandler, ReceiverHandler};
+use crate::handlers::{ConnectionHandler, HeartbeatHandler};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::slice;

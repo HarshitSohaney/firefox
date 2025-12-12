@@ -753,6 +753,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cast"
+version = "0.1.0"
+dependencies = [
+ "mozilla-central-workspace-hack",
+ "prost",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2599,6 +2608,7 @@ dependencies = [
  "bookmark_sync",
  "buildid_reader_ffi",
  "cascade_bloom_filter",
+ "cast",
  "cert_storage",
  "chardetng_c",
  "cose-c",
@@ -4643,6 +4653,7 @@ dependencies = [
  "percent-encoding",
  "phf",
  "proc-macro2",
+ "prost",
  "quote",
  "regex",
  "rkv",
