@@ -17,10 +17,7 @@ XPCOM_MANIFESTS += [
 
 EXTRA_JS_MODULES.cast = [
     "CastDevice.sys.mjs",
-    "CastDeviceRust.sys.mjs",
-    "CastFFI.sys.mjs",
     "CastServiceWrapper.sys.mjs",
-    "CastTransport.sys.mjs",
 ]
 
 FINAL_LIBRARY = "browsercomps"

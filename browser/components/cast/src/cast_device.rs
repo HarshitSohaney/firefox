@@ -2,6 +2,7 @@ use crate::handlers::ConnectionHandler;
 use crate::message::CastMessage;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_AVAILABLE, NS_OK};
 use nsstring::{nsACString, nsCString};
+use serde_json;
 use std::cell::RefCell;
 use std::ffi::CStr;
 use thin_vec::ThinVec;
@@ -20,6 +21,7 @@ pub struct CastDevice {
     input_stream: RefCell<Option<RefPtr<nsIInputStream>>>,
     input_pump: RefCell<Option<RefPtr<nsIInputStreamPump>>>,
     receive_buffer: RefCell<Vec<u8>>,
+    app_session_id: RefCell<Option<String>>,
 }
 
 impl CastDevice {
@@ -32,14 +34,32 @@ impl CastDevice {
             input_stream: RefCell::new(None),
             input_pump: RefCell::new(None),
             receive_buffer: RefCell::new(Vec::new()),
+            app_session_id: RefCell::new(None),
         })
+    }
+
+    pub fn get_app_session_id(&self) -> Option<String> {
+        self.app_session_id.borrow().clone()
+    }
+
+    pub fn set_app_session_id(&self, session_id: Option<String>) {
+        *self.app_session_id.borrow_mut() = session_id;
+    }
+
+    fn notify_state_change(&self, state: &str) {
+        *self.state.borrow_mut() = nsCString::from(state);
+        if let Some(callback) = self.callback.borrow().as_ref() {
+            unsafe {
+                callback.OnStateChanged(&nsCString::from(state) as &nsACString);
+            }
+        }
     }
 
     xpcom_method!(connect => Connect(address: *const nsACString, port: i32));
     fn connect(&self, address: &nsACString, port: i32) -> Result<(), nsresult> {
         println!("CastDevice: Connecting to {}:{}", address, port);
 
-        *self.state.borrow_mut() = nsCString::from("connecting");
+        self.notify_state_change("connecting");
 
         // Get the socket transport service
         let sts_service = xpcom::components::SocketTransport::service::<nsISocketTransportService>()
@@ -66,7 +86,7 @@ impl CastDevice {
 
         if rv.failed() || transport_ptr.is_null() {
             println!("CastDevice: Failed to create TLS transport");
-            *self.state.borrow_mut() = nsCString::from("error");
+            self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -81,7 +101,7 @@ impl CastDevice {
 
         if rv.failed() || output_stream_ptr.is_null() {
             println!("CastDevice: Failed to open output stream");
-            *self.state.borrow_mut() = nsCString::from("error");
+            self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -96,6 +116,13 @@ impl CastDevice {
         let connect_payload = ConnectionHandler::create_connect_message();
         self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
 
+        // Send GET_STATUS immediately (some devices like Google TV don't send CONNECTED response)
+        let get_status = serde_json::json!({
+            "type": "GET_STATUS",
+            "requestId": 1
+        }).to_string();
+        self.send_message_internal("urn:x-cast:com.google.cast.receiver", &get_status)?;
+
         // Open input stream and set up async reading
         let mut input_stream_ptr: *const nsIInputStream = std::ptr::null();
         let rv = unsafe {
@@ -104,7 +131,7 @@ impl CastDevice {
 
         if rv.failed() || input_stream_ptr.is_null() {
             println!("CastDevice: Failed to open input stream");
-            *self.state.borrow_mut() = nsCString::from("error");
+            self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -124,7 +151,7 @@ impl CastDevice {
 
         if rv.failed() {
             println!("CastDevice: Failed to initialize input stream pump");
-            *self.state.borrow_mut() = nsCString::from("error");
+            self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -136,12 +163,12 @@ impl CastDevice {
 
         if rv.failed() {
             println!("CastDevice: Failed to start async reading");
-            *self.state.borrow_mut() = nsCString::from("error");
+            self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
 
-        *self.state.borrow_mut() = nsCString::from("connected");
         println!("CastDevice: Connected successfully");
+        self.notify_state_change("connected");
 
         Ok(())
     }
@@ -151,12 +178,33 @@ impl CastDevice {
         namespace: &str,
         payload: &str,
     ) -> Result<(), nsresult> {
+        self.send_message_to("receiver-0", namespace, payload)
+    }
+
+    pub fn send_message_to(
+        &self,
+        destination_id: &str,
+        namespace: &str,
+        payload: &str,
+    ) -> Result<(), nsresult> {
+        // Log outgoing message with shortened namespace
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+            let msg_type = parsed["type"].as_str().unwrap_or("unknown");
+            let namespace_short = namespace.split('.').last().unwrap_or(namespace);
+            let dest_suffix = if destination_id == "receiver-0" {
+                String::from("")
+            } else {
+                format!(" to {}", &destination_id[..8])
+            };
+            println!("CastDevice: -> [{}] {}{}", namespace_short, msg_type, dest_suffix);
+        }
+
         let output_stream = self.output_stream.borrow();
         let stream = output_stream.as_ref().ok_or(NS_ERROR_NOT_AVAILABLE)?;
 
         let cast_message = CastMessage::new(
             "sender-0".to_string(),
-            "receiver-0".to_string(),
+            destination_id.to_string(),
             namespace.to_string(),
             payload.to_string(),
         );

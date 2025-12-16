@@ -75,6 +75,19 @@ impl CastStreamListener {
                 match CastMessage::decode(msg_bytes) {
                     Ok(message) => {
                         if let Some(payload) = &message.payload_utf8 {
+                            // Log incoming message with shortened namespace
+                            let namespace_short = message.namespace
+                                .split('.')
+                                .last()
+                                .unwrap_or(&message.namespace);
+
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+                                let msg_type = parsed["type"].as_str().unwrap_or("unknown");
+                                println!("CastStreamListener: <- [{}] {}", namespace_short, msg_type);
+                            } else {
+                                println!("CastStreamListener: <- [{}] (non-JSON payload)", namespace_short);
+                            }
+
                             self.handle_message(&message.namespace, payload);
                         }
                     }
@@ -105,23 +118,11 @@ impl CastStreamListener {
             }
         }
 
-        // Handle connection CONNECTED
+        // Handle connection CONNECTED (some devices send this, others don't)
         if namespace == "urn:x-cast:com.google.cast.tp.connection" {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
                 if parsed["type"] == "CONNECTED" {
-                    println!("CastStreamListener: Connection established");
-
-                    let get_status = serde_json::json!({
-                        "type": "GET_STATUS",
-                        "requestId": 1
-                    }).to_string();
-
-                    if let Err(e) = device_ref.send_message_internal(
-                        "urn:x-cast:com.google.cast.receiver",
-                        &get_status
-                    ) {
-                        println!("CastStreamListener: Failed to send GET_STATUS: {:?}", e);
-                    }
+                    println!("CastStreamListener: Received CONNECTED response");
                 }
             }
         }
@@ -134,20 +135,58 @@ impl CastStreamListener {
                     let has_app = applications.map_or(false, |apps| !apps.is_empty());
 
                     if !has_app {
-                        println!("CastStreamListener: Launching DefaultMediaReceiver");
-                        let launch = serde_json::json!({
-                            "type": "LAUNCH",
-                            "requestId": 2,
-                            "appId": "CC1AD845"
-                        }).to_string();
+                        // Only launch if we haven't already launched
+                        if device_ref.get_app_session_id().is_none() {
+                            println!("CastStreamListener: Launching DefaultMediaReceiver");
+                            let launch = serde_json::json!({
+                                "type": "LAUNCH",
+                                "requestId": 2,
+                                "appId": "CC1AD845"
+                            }).to_string();
 
-                        if let Err(e) = device_ref.send_message_internal(
-                            "urn:x-cast:com.google.cast.receiver",
-                            &launch
-                        ) {
-                            println!("CastStreamListener: Failed to send LAUNCH: {:?}", e);
-                        } else {
-                            println!("CastStreamListener: App launched successfully");
+                            if let Err(e) = device_ref.send_message_internal(
+                                "urn:x-cast:com.google.cast.receiver",
+                                &launch
+                            ) {
+                                println!("CastStreamListener: Failed to send LAUNCH: {:?}", e);
+                            } else {
+                                println!("CastStreamListener: App launched successfully");
+                            }
+                        }
+                    } else {
+                        // App already running - connect to it
+                        if let Some(apps) = applications {
+                            if let Some(app) = apps.get(0) {
+                                let session_id = app["sessionId"].as_str().map(|s| s.to_string());
+                                let transport_id = app["transportId"].as_str();
+                                let sender_connected = app["senderConnected"].as_bool().unwrap_or(false);
+
+                                // Track the session ID
+                                if let Some(sid) = session_id.clone() {
+                                    if device_ref.get_app_session_id() != Some(sid.clone()) {
+                                        device_ref.set_app_session_id(Some(sid));
+                                    }
+                                }
+
+                                if !sender_connected {
+                                    if let Some(tid) = transport_id {
+                                        println!("CastStreamListener: Connecting to existing app transport: {}", tid);
+                                        let connect = serde_json::json!({"type": "CONNECT"}).to_string();
+
+                                        if let Err(e) = device_ref.send_message_to(
+                                            tid,
+                                            "urn:x-cast:com.google.cast.tp.connection",
+                                            &connect
+                                        ) {
+                                            println!("CastStreamListener: Failed to connect to app: {:?}", e);
+                                        } else {
+                                            println!("CastStreamListener: Connected to existing app");
+                                        }
+                                    }
+                                } else {
+                                    println!("CastStreamListener: Already connected to app");
+                                }
+                            }
                         }
                     }
                 }
