@@ -1,14 +1,4 @@
 import { CastDevice } from "resource:///modules/cast/CastDevice.sys.mjs";
-import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-
-const lazy = {};
-
-XPCOMUtils.defineLazyServiceGetter(
-  lazy,
-  "certOverrideService",
-  "@mozilla.org/security/certoverride;1",
-  Ci.nsICertOverrideService
-);
 
 class CastService {
   constructor() {
@@ -24,38 +14,6 @@ class CastService {
     }
 
     console.log("CastService: Initializing");
-
-    try {
-      console.log("CastService: Disabling certificate checks for Cast...");
-
-      Services.prefs.setBoolPref(
-        "network.stricttransportsecurity.preloadlist",
-        false
-      );
-      Services.prefs.setIntPref("security.cert_pinning.enforcement_level", 0);
-
-      const env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-      env.set("XPCSHELL_TEST_PROFILE_DIR", "1");
-
-      lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
-        true
-      );
-
-      console.log(
-        "CastService: Successfully disabled certificate checks for Cast connections"
-      );
-      console.warn(
-        "WARNING: All TLS certificate validation is now disabled! This is for Cast development only."
-      );
-    } catch (e) {
-      console.error("CastService: Failed to disable certificate checks:", e);
-      console.error("CastService: Error stack:", e.stack);
-      console.warn(
-        "CastService: Certificate validation errors may prevent Cast connections"
-      );
-    }
 
     this._initialized = true;
   }
@@ -157,20 +115,7 @@ class CastService {
   }
 
   cleanup() {
-    try {
-      lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
-        false
-      );
-
-      const env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-      env.set("XPCSHELL_TEST_PROFILE_DIR", "");
-
-      console.log("CastService: Re-enabled certificate checks");
-    } catch (e) {
-      console.warn("CastService: Could not re-enable certificate checks:", e);
-    }
+    console.log("CastService: Cleanup");
   }
 }
 

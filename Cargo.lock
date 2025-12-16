@@ -756,9 +756,13 @@ dependencies = [
 name = "cast"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mozilla-central-workspace-hack",
+ "nserror",
+ "nsstring",
  "prost",
  "serde_json",
+ "xpcom",
 ]
 
 [[package]]

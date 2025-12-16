@@ -1,0 +1,65 @@
+#include "nsISupports.idl"
+
+/**
+ * Callback interface for Cast device events.
+ */
+[scriptable, uuid(7c8e9f5a-1b2c-4d3e-8f9a-0b1c2d3e4f5a)]
+interface nsICastDeviceCallback : nsISupports
+{
+  /**
+   * Called when the device connection state changes.
+   * @param state One of: "disconnected", "connecting", "connected", "ready"
+   */
+  void onStateChanged(in AUTF8String state);
+
+  /**
+   * Called when a message is received from the Cast device.
+   * @param namespace The Cast protocol namespace
+   * @param payload JSON payload string
+   */
+  void onMessage(in AUTF8String namespace, in AUTF8String payload);
+
+  /**
+   * Called when an error occurs.
+   * @param error Error message
+   */
+  void onError(in AUTF8String error);
+};
+
+/**
+ * Cast device connection and communication.
+ * Manages TLS connection and Cast protocol v2 messaging.
+ */
+[scriptable, uuid(a1b2c3d4-e5f6-4a5b-9c8d-7e6f5a4b3c2d)]
+interface nsICastDevice : nsISupports
+{
+  /**
+   * Connect to a Cast device.
+   * @param address IP address of the Cast device
+   * @param port Port number (typically 8009)
+   */
+  void connect(in AUTF8String address, in long port);
+
+  /**
+   * Disconnect from the Cast device.
+   */
+  void disconnect();
+
+  /**
+   * Send a Cast protocol message.
+   * @param namespace Cast protocol namespace
+   * @param payload JSON payload string
+   */
+  void sendMessage(in AUTF8String namespace, in AUTF8String payload);
+
+  /**
+   * Set callback for device events.
+   */
+  attribute nsICastDeviceCallback callback;
+
+  /**
+   * Current connection state.
+   * One of: "disconnected", "connecting", "connected", "ready"
+   */
+  readonly attribute AUTF8String state;
+};

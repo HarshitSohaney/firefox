@@ -5,8 +5,19 @@
 with Files("**"):
     BUG_COMPONENT = ("Firefox", "Cast")
 
+XPIDL_SOURCES += [
+    "nsICastDevice.idl",
+]
+
+XPIDL_MODULE = "cast"
+
+XPCOM_MANIFESTS += [
+    "components.conf",
+]
+
 EXTRA_JS_MODULES.cast = [
     "CastDevice.sys.mjs",
+    "CastDeviceRust.sys.mjs",
     "CastFFI.sys.mjs",
     "CastServiceWrapper.sys.mjs",
     "CastTransport.sys.mjs",
