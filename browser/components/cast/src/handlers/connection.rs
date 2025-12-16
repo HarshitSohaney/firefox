@@ -7,9 +7,7 @@ impl ConnectionHandler {
 
     pub fn create_connect_message() -> String {
         json!({
-            "type": "CONNECT",
-            "origin": {},
-            "userAgent": "Mozilla/5.0 (Firefox Cast Client)"
+            "type": "CONNECT"
         })
         .to_string()
     }

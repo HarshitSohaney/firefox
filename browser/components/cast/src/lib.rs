@@ -1,7 +1,7 @@
 pub mod cast_device;
-pub mod cast_ffi;
 pub mod handlers;
 pub mod message;
+pub mod stream_listener;
 
 pub use handlers::{ConnectionHandler, HeartbeatHandler, ReceiverHandler};
 pub use message::CastMessage;

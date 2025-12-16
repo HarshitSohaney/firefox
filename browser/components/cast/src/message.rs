@@ -9,7 +9,7 @@ pub enum PayloadType {
 
 #[derive(Clone, PartialEq, Message)]
 pub struct CastMessage {
-    #[prost(int32, required, tag = "1")]
+    #[prost(enumeration = "i32", required, tag = "1")]
     pub protocol_version: i32,
     #[prost(string, required, tag = "2")]
     pub source_id: String,

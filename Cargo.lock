@@ -762,6 +762,7 @@ dependencies = [
  "nsstring",
  "prost",
  "serde_json",
+ "thin-vec",
  "xpcom",
 ]
 
