@@ -22,6 +22,7 @@ pub struct CastDevice {
     input_pump: RefCell<Option<RefPtr<nsIInputStreamPump>>>,
     receive_buffer: RefCell<Vec<u8>>,
     app_session_id: RefCell<Option<String>>,
+    app_transport_id: RefCell<Option<String>>,
 }
 
 impl CastDevice {
@@ -35,6 +36,7 @@ impl CastDevice {
             input_pump: RefCell::new(None),
             receive_buffer: RefCell::new(Vec::new()),
             app_session_id: RefCell::new(None),
+            app_transport_id: RefCell::new(None),
         })
     }
 
@@ -44,6 +46,14 @@ impl CastDevice {
 
     pub fn set_app_session_id(&self, session_id: Option<String>) {
         *self.app_session_id.borrow_mut() = session_id;
+    }
+
+    pub fn get_transport_id(&self) -> Option<String> {
+        self.app_transport_id.borrow().clone()
+    }
+
+    pub fn set_transport_id(&self, transport_id: Option<String>) {
+        *self.app_transport_id.borrow_mut() = transport_id;
     }
 
     fn notify_state_change(&self, state: &str) {
@@ -91,6 +101,13 @@ impl CastDevice {
         }
 
         let transport: RefPtr<nsISocketTransport> = unsafe { RefPtr::from_raw(transport_ptr as *mut _).unwrap() };
+
+        // Set security callbacks to allow self-signed certs
+        let cert_override = crate::cert_override::CertOverrideCallbacks::new();
+        unsafe {
+            transport.SetSecurityCallbacks(cert_override.coerce());
+        }
+
         *self.transport.borrow_mut() = Some(transport.clone());
 
         // Open output stream
@@ -178,7 +195,19 @@ impl CastDevice {
         namespace: &str,
         payload: &str,
     ) -> Result<(), nsresult> {
-        self.send_message_to("receiver-0", namespace, payload)
+        let destination = if namespace == "urn:x-cast:com.google.cast.media" {
+            if let Some(transport_id) = self.get_transport_id() {
+                println!("CastDevice: Routing media message to app transport: {}", transport_id);
+                transport_id
+            } else {
+                println!("CastDevice: WARNING - No transport ID, sending media message to receiver-0");
+                "receiver-0".to_string()
+            }
+        } else {
+            "receiver-0".to_string()
+        };
+
+        self.send_message_to(&destination, namespace, payload)
     }
 
     pub fn send_message_to(
@@ -253,7 +282,7 @@ impl CastDevice {
     }
 
     xpcom_method!(get_callback => GetCallback() -> *const nsICastDeviceCallback);
-    fn get_callback(&self) -> Result<RefPtr<nsICastDeviceCallback>, nsresult> {
+    pub fn get_callback(&self) -> Result<RefPtr<nsICastDeviceCallback>, nsresult> {
         match &*self.callback.borrow() {
             Some(cb) => Ok(cb.clone()),
             None => Err(NS_ERROR_NOT_AVAILABLE),
@@ -270,5 +299,13 @@ impl CastDevice {
     xpcom_method!(get_state => GetState() -> nsACString);
     fn get_state(&self) -> Result<nsCString, nsresult> {
         Ok(self.state.borrow().clone())
+    }
+
+    xpcom_method!(get_app_transport_id => GetAppTransportId() -> nsACString);
+    fn get_app_transport_id(&self) -> Result<nsCString, nsresult> {
+        match self.app_transport_id.borrow().as_ref() {
+            Some(tid) => Ok(nsCString::from(tid.as_str())),
+            None => Ok(nsCString::new()),
+        }
     }
 }

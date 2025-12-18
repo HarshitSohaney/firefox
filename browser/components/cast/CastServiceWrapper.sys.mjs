@@ -3,6 +3,10 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
 
+ChromeUtils.defineESModuleGetters(lazy, {
+  CastTabSession: "resource:///modules/cast/CastTabSession.sys.mjs",
+});
+
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
   "certOverrideService",
@@ -14,6 +18,7 @@ class CastService {
   constructor() {
     this._devices = new Map();
     this._activeSession = null;
+    this._tabSession = null;
     this._stateListeners = new Set();
     this._initialized = false;
   }
@@ -26,7 +31,12 @@ class CastService {
     console.log("CastService: Initializing");
 
     try {
-      console.log("CastService: Disabling certificate checks for Cast...");
+      // CRITICAL: Set XPCSHELL_TEST_PROFILE_DIR *BEFORE* calling cert override service
+      // This enables setDisableAllSecurityChecksAndLetAttackersInterceptMyData
+      const env = Cc["@mozilla.org/process/environment;1"].getService(
+        Ci.nsIEnvironment
+      );
+      env.set("XPCSHELL_TEST_PROFILE_DIR", "1");
 
       Services.prefs.setBoolPref(
         "network.stricttransportsecurity.preloadlist",
@@ -34,27 +44,18 @@ class CastService {
       );
       Services.prefs.setIntPref("security.cert_pinning.enforcement_level", 0);
 
-      const env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-      env.set("XPCSHELL_TEST_PROFILE_DIR", "1");
-
       lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
         true
       );
 
       console.log(
-        "CastService: Successfully disabled certificate checks for Cast connections"
+        "CastService: Certificate validation disabled for Cast development"
       );
       console.warn(
-        "WARNING: All TLS certificate validation is now disabled! This is for Cast development only."
+        "WARNING: TLS certificate validation is disabled! This is for Cast development only."
       );
     } catch (e) {
-      console.error("CastService: Failed to disable certificate checks:", e);
-      console.error("CastService: Error stack:", e.stack);
-      console.warn(
-        "CastService: Certificate validation errors may prevent Cast connections"
-      );
+      console.error("CastService: Failed to disable cert validation:", e);
     }
 
     this._initialized = true;
@@ -138,6 +139,65 @@ class CastService {
     }
   }
 
+  async startTabCasting(deviceId, browser, window, options = {}) {
+    const device = this._devices.get(deviceId);
+    if (!device) {
+      throw new Error("Device not found");
+    }
+
+    if (device.state !== "connected") {
+      await device.connect();
+    }
+
+    if (this._tabSession && this._tabSession.isActive()) {
+      throw new Error("Tab casting already in progress");
+    }
+
+    console.log("CastService: Launching DefaultMediaReceiver...");
+    const launchResult = await device.launchApp("CC1AD845");
+    console.log("CastService: Launch result:", launchResult);
+
+    this._activeSession = {
+      device,
+      sessionId: launchResult.status?.applications?.[0]?.sessionId,
+    };
+
+    console.log("CastService: Starting tab casting...");
+
+    this._tabSession = new lazy.CastTabSession(device, window);
+
+    try {
+      const result = await this._tabSession.start(browser, options);
+      console.log("CastService: Tab casting started successfully");
+      this._notifyStateListeners("casting", device);
+      return result;
+    } catch (error) {
+      console.error("CastService: Failed to start tab casting:", error);
+      this._tabSession = null;
+      this._activeSession = null;
+      throw error;
+    }
+  }
+
+  async stopTabCasting() {
+    if (!this._tabSession) {
+      return;
+    }
+
+    console.log("CastService: Stopping tab casting...");
+
+    try {
+      await this._tabSession.stop();
+    } finally {
+      this._tabSession = null;
+      this._notifyStateListeners("connected", null);
+    }
+  }
+
+  getTabSession() {
+    return this._tabSession;
+  }
+
   addStateListener(listener) {
     this._stateListeners.add(listener);
   }
@@ -157,21 +217,28 @@ class CastService {
   }
 
   cleanup() {
+    for (const [deviceId, device] of this._devices) {
+      try {
+        device.disconnect();
+      } catch (e) {
+        console.warn(`CastService: Error cleaning up device ${deviceId}:`, e);
+      }
+    }
+
+    this._devices.clear();
+    this._activeSession = null;
+    this._tabSession = null;
+
     try {
       lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
         false
       );
-
-      const env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-      env.set("XPCSHELL_TEST_PROFILE_DIR", "");
-
-      console.log("CastService: Re-enabled certificate checks");
+      console.log("CastService: Certificate validation re-enabled");
     } catch (e) {
-      console.warn("CastService: Could not re-enable certificate checks:", e);
+      console.warn("CastService: Could not re-enable cert validation:", e);
     }
-    console.log("CastService: Cleanup");
+
+    console.log("CastService: Cleanup complete");
   }
 }
 

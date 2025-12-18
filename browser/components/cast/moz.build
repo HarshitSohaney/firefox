@@ -7,6 +7,7 @@ with Files("**"):
 
 XPIDL_SOURCES += [
     "nsICastDevice.idl",
+    "nsICastVideoEncoder.idl",
 ]
 
 XPIDL_MODULE = "cast"
@@ -17,7 +18,10 @@ XPCOM_MANIFESTS += [
 
 EXTRA_JS_MODULES.cast = [
     "CastDevice.sys.mjs",
+    "CastMediaHandler.sys.mjs",
     "CastServiceWrapper.sys.mjs",
+    "CastTabSession.sys.mjs",
+    "SimpleHTTPServer.sys.mjs",
 ]
 
 FINAL_LIBRARY = "browsercomps"

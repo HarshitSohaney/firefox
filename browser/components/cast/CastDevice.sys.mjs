@@ -6,6 +6,7 @@
 import {
   setInterval,
   clearInterval,
+  setTimeout,
 } from "resource://gre/modules/Timer.sys.mjs";
 
 export class CastDevice {
@@ -156,11 +157,36 @@ export class CastDevice {
 
     try {
       await this.sendMessage("urn:x-cast:com.google.cast.receiver", payload);
-      return { success: true };
+
+      console.log("CastDevice: Waiting for transport ID...");
+      const transportId = await this._waitForTransportId(5000);
+
+      if (transportId) {
+        console.log(`CastDevice: Got transport ID: ${transportId}`);
+        return { success: true, transportId };
+      } else {
+        console.warn("CastDevice: Timeout waiting for transport ID");
+        return { success: true };
+      }
     } catch (error) {
       console.error("CastDevice: Launch app failed:", error);
       throw error;
     }
+  }
+
+  async _waitForTransportId(timeoutMs) {
+    const startTime = Date.now();
+    const pollInterval = 50;
+
+    while (Date.now() - startTime < timeoutMs) {
+      const transportId = this._xpcomDevice.getAppTransportId();
+      if (transportId) {
+        return transportId;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+
+    return null;
   }
 
   addEventListener(event, callback) {

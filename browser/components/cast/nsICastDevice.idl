@@ -62,4 +62,10 @@ interface nsICastDevice : nsISupports
    * One of: "disconnected", "connecting", "connected", "ready"
    */
   readonly attribute AUTF8String state;
+
+  /**
+   * Get the app transport ID for media messaging.
+   * Returns empty string if no app is running.
+   */
+  AUTF8String getAppTransportId();
 };

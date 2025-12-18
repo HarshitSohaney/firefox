@@ -1,5 +1,6 @@
 use crate::message::CastMessage;
 use nserror::{nsresult, NS_OK};
+use nsstring::{nsACString, nsCString};
 use prost::Message;
 use serde_json;
 use std::cell::RefCell;
@@ -106,6 +107,15 @@ impl CastStreamListener {
             None => return,
         };
 
+        // Forward all messages to JavaScript callback
+        if let Ok(callback) = device_ref.get_callback() {
+            unsafe {
+                let ns_cstring = nsCString::from(namespace);
+                let payload_cstring = nsCString::from(payload);
+                callback.OnMessage(&ns_cstring as &nsACString, &payload_cstring as &nsACString);
+            }
+        }
+
         // Handle heartbeat PING
         if namespace == "urn:x-cast:com.google.cast.tp.heartbeat" {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
@@ -165,6 +175,14 @@ impl CastStreamListener {
                                 if let Some(sid) = session_id.clone() {
                                     if device_ref.get_app_session_id() != Some(sid.clone()) {
                                         device_ref.set_app_session_id(Some(sid));
+                                    }
+                                }
+
+                                // Track the transport ID
+                                if let Some(tid) = transport_id {
+                                    if device_ref.get_transport_id() != Some(tid.to_string()) {
+                                        println!("CastStreamListener: Setting transport ID: {}", tid);
+                                        device_ref.set_transport_id(Some(tid.to_string()));
                                     }
                                 }
 

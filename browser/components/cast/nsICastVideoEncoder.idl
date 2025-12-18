@@ -1,0 +1,14 @@
+#include "nsISupports.idl"
+
+[scriptable, uuid(e3b2c4d6-7890-4abc-def1-234567890abc)]
+interface nsICastVideoEncoder : nsISupports
+{
+    void init(in unsigned long width, in unsigned long height,
+              in unsigned long bitrate, in unsigned long fps);
+
+    Array<octet> encodeFrame(in Array<octet> rgbaData, in boolean forceKeyframe);
+
+    Array<octet> getHeader();
+
+    void shutdown();
+};

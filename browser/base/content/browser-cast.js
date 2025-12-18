@@ -6,6 +6,7 @@ var gCastUI = {
   _castService: null,
   _discovery: null,
   _initialized: false,
+  _connectedDeviceId: null,
 
   init() {
     console.log("gCastUI: Starting initialization...");
@@ -65,7 +66,9 @@ var gCastUI = {
       await this._castService.testConnection(deviceId);
 
       console.log("gCastUI: Connection test successful!");
-      alert("Connected successfully! Check console for messages.");
+
+      this._connectedDeviceId = deviceId;
+      this.showConnectedNotification();
     } catch (ex) {
       console.error("gCastUI: Connection test failed:", ex);
       console.error("gCastUI: Error stack:", ex.stack);
@@ -73,18 +76,73 @@ var gCastUI = {
     }
   },
 
+  showConnectedNotification() {
+    const notificationBox = gBrowser.getNotificationBox();
+
+    const notification = notificationBox.appendNotification(
+      "cast-connected",
+      {
+        label: "Cast device connected. Click to cast this tab.",
+        priority: notificationBox.PRIORITY_INFO_HIGH,
+      },
+      [
+        {
+          label: "Cast This Tab",
+          callback: () => {
+            this.startTabCasting(this._connectedDeviceId);
+          },
+        },
+        {
+          label: "Disconnect",
+          callback: () => {
+            this.stopCasting();
+          },
+        },
+      ]
+    );
+  },
+
   async stopCasting() {
     try {
       console.log("gCastUI: Stopping cast");
       await this._castService.stopCasting();
+      await this._castService.stopTabCasting();
       console.log("gCastUI: Casting stopped");
     } catch (ex) {
       console.error("gCastUI: Failed to stop casting:", ex);
     }
   },
 
+  async startTabCasting(deviceId) {
+    try {
+      console.log("gCastUI: Starting tab casting to device", deviceId);
+
+      const browser = gBrowser.selectedBrowser;
+      const result = await this._castService.startTabCasting(
+        deviceId,
+        browser,
+        window,
+        { fps: 10, quality: 0.8 }
+      );
+
+      console.log("gCastUI: Tab casting started:", result);
+      this.showCastingNotification();
+
+      return result;
+    } catch (ex) {
+      console.error("gCastUI: Tab casting failed:", ex);
+      alert(`Tab casting failed: ${ex.message}\n\nCheck Browser Console for details.`);
+      throw ex;
+    }
+  },
+
   showCastingNotification() {
     const notificationBox = gBrowser.getNotificationBox();
+
+    const connectedNotif = notificationBox.getNotificationWithValue("cast-connected");
+    if (connectedNotif) {
+      notificationBox.removeNotification(connectedNotif);
+    }
 
     const notification = notificationBox.appendNotification(
       "cast-active",
@@ -108,9 +166,15 @@ var gCastUI = {
 
     if (state === "idle" || state === "error") {
       const notificationBox = gBrowser.getNotificationBox();
-      const notification = notificationBox.getNotificationWithValue("cast-active");
-      if (notification) {
-        notificationBox.removeNotification(notification);
+
+      const activeNotif = notificationBox.getNotificationWithValue("cast-active");
+      if (activeNotif) {
+        notificationBox.removeNotification(activeNotif);
+      }
+
+      const connectedNotif = notificationBox.getNotificationWithValue("cast-connected");
+      if (connectedNotif) {
+        notificationBox.removeNotification(connectedNotif);
       }
     }
   },
