@@ -7,9 +7,6 @@ export class SimpleHTTPServer {
   }
 
   onSocketAccepted(serverSocket, transport) {
-    console.log("SimpleHTTPServer: onSocketAccepted called!");
-    console.log("SimpleHTTPServer: Client connected");
-
     const connection = {
       transport,
       outputStream: null,
@@ -50,22 +47,15 @@ export class SimpleHTTPServer {
 
       const available = scriptableStream.available();
       if (available === 0) {
-        console.log("SimpleHTTPServer: No data available, closing");
         this.closeConnection(connection);
         return;
       }
 
       const requestData = scriptableStream.read(available);
 
-      console.log("SimpleHTTPServer: === RAW REQUEST START ===");
-      console.log(requestData.slice(0, 2048));
-      console.log("SimpleHTTPServer: === RAW REQUEST END ===");
-
       const requestLines = requestData.split("\r\n");
       const requestLine = requestLines[0];
       const [method, path] = requestLine.split(" ");
-
-      console.log(`SimpleHTTPServer: ${method} ${path}`);
 
       if (method === "OPTIONS") {
         this.sendOptionsResponse(connection);
@@ -90,7 +80,6 @@ export class SimpleHTTPServer {
   }
 
   onStopListening(serverSocket, status) {
-    console.log("SimpleHTTPServer: Stopped listening");
   }
 
   registerPathHandler(path, handler) {
@@ -103,32 +92,22 @@ export class SimpleHTTPServer {
     );
 
     try {
-      console.log(`SimpleHTTPServer: Creating server on port ${port}`);
-
       this.serverSocket.initDualStack(port, 4);
-
       this.port = this.serverSocket.port;
-
-      console.log(`SimpleHTTPServer: Socket created, port ${this.port}, calling asyncListen...`);
 
       const self = this;
       this.serverSocket.asyncListen({
         onSocketAccepted(socket, transport) {
-          console.log("SimpleHTTPServer: onSocketAccepted called!");
           self.onSocketAccepted(socket, transport);
         },
         onStopListening(socket, status) {
-          console.log("SimpleHTTPServer: onStopListening called");
           self.onStopListening(socket, status);
         }
       });
 
-      console.log(`SimpleHTTPServer: asyncListen called successfully`);
-      console.log(`SimpleHTTPServer: Listening on port ${this.port}`);
       return this.port;
     } catch (e) {
-      console.error(`SimpleHTTPServer: Failed to start server:`, e);
-      console.error(`SimpleHTTPServer: Error stack:`, e.stack);
+      console.error("SimpleHTTPServer: Failed to start server:", e);
       throw e;
     }
   }
@@ -202,8 +181,25 @@ export class SimpleHTTPServer {
     for (const connection of this.activeConnections) {
       this.closeConnection(connection);
     }
+  }
 
-    console.log("SimpleHTTPServer: Stopped");
+  getLocalHostname() {
+    try {
+      const dnsService = Cc["@mozilla.org/network/dns-service;1"]
+        .getService(Ci.nsIDNSService);
+      let hostname = dnsService.myHostName;
+      if (hostname && hostname.length > 0) {
+        if (!hostname.endsWith(".local")) {
+          hostname += ".local";
+        }
+        console.log(`SimpleHTTPServer: Got hostname: ${hostname}`);
+        return hostname;
+      }
+    } catch (e) {
+      console.error("SimpleHTTPServer: Error getting hostname:", e);
+    }
+
+    return null;
   }
 
   getLocalIP(castDeviceIP = null) {

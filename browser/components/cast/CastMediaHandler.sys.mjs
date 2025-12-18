@@ -25,7 +25,6 @@ export class CastMediaHandler {
     }
 
     const payload = JSON.stringify(message);
-    console.log(`CastMediaHandler: Sending ${command}:`, payload);
 
     try {
       await this.castDevice.sendMessage(
@@ -58,8 +57,6 @@ export class CastMediaHandler {
       media,
       autoplay: false,
     };
-
-    console.log("CastMediaHandler: LOAD command:", JSON.stringify(loadCommand, null, 2));
 
     return await this.sendMediaCommand("LOAD", loadCommand);
   }
@@ -99,7 +96,6 @@ export class CastMediaHandler {
   handleMediaStatus(payload) {
     try {
       const message = JSON.parse(payload);
-      console.log("CastMediaHandler: Received MEDIA_STATUS:", message);
 
       if (message.status && message.status.length > 0) {
         const status = message.status[0];
@@ -107,22 +103,12 @@ export class CastMediaHandler {
           this.mediaSessionId = status.mediaSessionId;
         }
 
-        const playerState = status.playerState;
-        console.log(
-          `CastMediaHandler: Player state: ${playerState}, session: ${this.mediaSessionId}`
-        );
-
-        if (status.idleReason) {
-          console.log(
-            `CastMediaHandler: Idle reason: ${status.idleReason}`
-          );
-          if (status.idleReason === "FINISHED" || status.idleReason === "ERROR") {
-            this.mediaSessionId = null;
-          }
+        if (status.idleReason === "FINISHED" || status.idleReason === "ERROR") {
+          this.mediaSessionId = null;
         }
 
         return {
-          playerState,
+          playerState: status.playerState,
           mediaSessionId: this.mediaSessionId,
           currentTime: status.currentTime,
           idleReason: status.idleReason,

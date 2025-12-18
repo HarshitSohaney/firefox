@@ -39,7 +39,6 @@ export class CastTabSession {
     this.setState("starting");
 
     try {
-      console.log("CastTabSession: Requesting display media...");
       this.mediaStream = await this.window.navigator.mediaDevices.getDisplayMedia({
         video: {
           displaySurface: "browser",
@@ -86,13 +85,13 @@ export class CastTabSession {
         this.handleStreamRequest(connection);
       });
       const port = this.server.start(8010);
-      const castDeviceIP = this.castDevice.address;
-      console.log(`CastTabSession: Cast device IP is ${castDeviceIP}`);
-      const localIP = this.server.getLocalIP(castDeviceIP);
-      // const streamURL = `http://${localIP}:${port}/stream.webm`;
-      const streamURL = "https://unobscenely-keyed-tatiana.ngrok-free.dev/stream.webm";
 
-      console.log(`CastTabSession: Stream URL: ${streamURL}`);
+      const hostname = this.server.getLocalHostname();
+      const streamURL = hostname
+        ? `http://${hostname}:${port}/stream.webm`
+        : `http://${this.server.getLocalIP(this.castDevice.address)}:${port}/stream.webm`;
+
+      console.log(`CastTabSession: Stream URL: ${streamURL} (using ${hostname ? 'system hostname' : 'fallback IP'})`);
 
       const fps = options.fps || 15;
       const intervalMs = 1000 / fps;
@@ -115,7 +114,6 @@ export class CastTabSession {
       await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
 
       this.setState("streaming");
-      console.log("CastTabSession: Tab casting started successfully");
 
       return {
         streamURL,
@@ -130,8 +128,6 @@ export class CastTabSession {
   }
 
   handleStreamRequest(connection) {
-    console.log("CastTabSession: Client connected for WebM stream");
-
     try {
       const headers =
         "HTTP/1.1 200 OK\r\n" +
@@ -145,20 +141,14 @@ export class CastTabSession {
         "Access-Control-Expose-Headers: Content-Length, Content-Range\r\n" +
         "\r\n";
 
-      console.log("CastTabSession: Sending HTTP headers with chunked encoding");
       connection.outputStream.write(headers, headers.length);
 
-      console.log("CastTabSession: Getting WebM header from encoder");
       const header = this.encoder.getHeader();
-      console.log(`CastTabSession: Got WebM header, ${header.length} bytes`);
-
       this.writeChunk(connection.outputStream, header);
-      console.log("CastTabSession: WebM header chunk sent and flushed");
 
       this.streamConnection = connection;
     } catch (e) {
       console.error("CastTabSession: Error in handleStreamRequest:", e);
-      console.error(e.stack);
       if (this.server) {
         this.server.closeConnection(connection);
       }
@@ -236,7 +226,6 @@ export class CastTabSession {
 
     await this.cleanup();
     this.setState("idle");
-    console.log("CastTabSession: Session stopped");
   }
 
   async cleanup() {
@@ -299,21 +288,14 @@ export class CastTabSession {
 
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
-        if (status) {
-          console.log(
-            `CastTabSession: Media status - ${status.playerState}`
-          );
-
-          if (status.idleReason === "ERROR") {
-            console.error("CastTabSession: Media playback error");
-            this.setState("error");
-          }
+        if (status?.idleReason === "ERROR") {
+          console.error("CastTabSession: Media playback error");
+          this.setState("error");
         }
       } else if (message.type === "LOAD_FAILED") {
         console.error("CastTabSession: LOAD_FAILED:", message);
         this.setState("error");
       } else if (message.type === "LOAD_CANCELLED") {
-        console.log("CastTabSession: LOAD_CANCELLED");
         this.setState("idle");
       }
     } catch (e) {
@@ -322,7 +304,6 @@ export class CastTabSession {
   }
 
   setState(newState) {
-    console.log(`CastTabSession: ${this.state} -> ${newState}`);
     this.state = newState;
   }
 
