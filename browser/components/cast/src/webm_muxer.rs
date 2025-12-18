@@ -35,11 +35,19 @@ impl WebMMuxer {
         let mut cluster = Vec::new();
 
         if keyframe || timestamp_ms - self.cluster_timecode > 10000 {
+            println!("WebMMuxer: Writing cluster header at timestamp {}ms", timestamp_ms);
             self.write_cluster_header(&mut cluster, timestamp_ms);
             self.cluster_timecode = timestamp_ms;
         }
 
+        println!("WebMMuxer: Writing SimpleBlock - VP8 size: {}, timestamp: {}ms, keyframe: {}, relative_timecode: {}",
+                 vp8_data.len(), timestamp_ms, keyframe, (timestamp_ms - self.cluster_timecode) as i16);
+        println!("  VP8 first 32 bytes: {:02x?}", &vp8_data[..vp8_data.len().min(32)]);
+
         self.write_simple_block(&mut cluster, vp8_data, timestamp_ms, keyframe);
+
+        println!("  Cluster chunk size: {} bytes", cluster.len());
+        println!("  Cluster first 32 bytes: {:02x?}", &cluster[..cluster.len().min(32)]);
 
         cluster
     }

@@ -86,7 +86,8 @@ export class CastTabSession {
       const castDeviceIP = this.castDevice.address;
       console.log(`CastTabSession: Cast device IP is ${castDeviceIP}`);
       const localIP = this.server.getLocalIP(castDeviceIP);
-      const streamURL = `http://${localIP}:${port}/stream.webm`;
+      // const streamURL = `http://${localIP}:${port}/stream.webm`;
+      const streamURL = "https://unobscenely-keyed-tatiana.ngrok-free.dev/stream.webm";
 
       console.log(`CastTabSession: Stream URL: ${streamURL}`);
 
@@ -108,7 +109,7 @@ export class CastTabSession {
         metadataType: 0,
         title: "Firefox Tab Cast",
       };
-      await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
+      await this.mediaHandler.load(streamURL, "video/webm", "BUFFERED", metadata);
 
       this.setState("streaming");
       console.log("CastTabSession: Tab casting started successfully");
@@ -134,27 +135,23 @@ export class CastTabSession {
         "Content-Type: video/webm\r\n" +
         "Cache-Control: no-cache, no-store, must-revalidate\r\n" +
         "Connection: keep-alive\r\n" +
+        "Transfer-Encoding: chunked\r\n" +
         "Access-Control-Allow-Origin: *\r\n" +
         "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n" +
         "Access-Control-Allow-Headers: Content-Type, Range\r\n" +
         "Access-Control-Expose-Headers: Content-Length, Content-Range\r\n" +
         "\r\n";
 
-      console.log("CastTabSession: Sending HTTP headers");
+      console.log("CastTabSession: Sending HTTP headers with chunked encoding");
       connection.outputStream.write(headers, headers.length);
 
       console.log("CastTabSession: Getting WebM header from encoder");
       const header = this.encoder.getHeader();
       console.log(`CastTabSession: Got WebM header, ${header.length} bytes`);
 
-      const binaryStream = Cc["@mozilla.org/binaryoutputstream;1"]
-        .createInstance(Ci.nsIBinaryOutputStream);
-      binaryStream.setOutputStream(connection.outputStream);
-      binaryStream.writeByteArray(header);
-      binaryStream.flush();
-      console.log("CastTabSession: WebM header sent, stream ready");
+      this.writeChunk(connection.outputStream, header);
+      console.log("CastTabSession: WebM header chunk sent and flushed");
 
-      connection.binaryStream = binaryStream;
       this.streamConnection = connection;
     } catch (e) {
       console.error("CastTabSession: Error in handleStreamRequest:", e);
@@ -163,6 +160,22 @@ export class CastTabSession {
         this.server.closeConnection(connection);
       }
     }
+  }
+
+  writeChunk(outputStream, data) {
+    const chunkSize = data.length.toString(16);
+    const chunkHeader = `${chunkSize}\r\n`;
+
+    outputStream.write(chunkHeader, chunkHeader.length);
+
+    const binaryStream = Cc["@mozilla.org/binaryoutputstream;1"]
+      .createInstance(Ci.nsIBinaryOutputStream);
+    binaryStream.setOutputStream(outputStream);
+    binaryStream.writeByteArray(data);
+
+    const chunkFooter = "\r\n";
+    outputStream.write(chunkFooter, chunkFooter.length);
+    outputStream.flush();
   }
 
   captureAndEncode() {
@@ -189,10 +202,9 @@ export class CastTabSession {
 
       const webmCluster = this.encoder.encodeFrame(rgbaArray, false);
 
-      if (this.streamConnection && this.streamConnection.binaryStream && webmCluster.length > 0) {
+      if (this.streamConnection && webmCluster.length > 0) {
         try {
-          this.streamConnection.binaryStream.writeByteArray(webmCluster);
-          this.streamConnection.binaryStream.flush();
+          this.writeChunk(this.streamConnection.outputStream, webmCluster);
         } catch (e) {
           console.error("CastTabSession: Error writing to stream:", e);
           this.streamConnection = null;

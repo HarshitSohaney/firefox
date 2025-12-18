@@ -79,7 +79,7 @@ impl CastVideoEncoder {
             let mut ctx: Box<vpx_codec_ctx> = Box::new(std::mem::zeroed());
 
             println!("CastVideoEncoder: Initializing encoder with ABI version {}...", VPX_ENCODER_ABI_VERSION);
-            let flags = VPX_CODEC_USE_OUTPUT_PARTITION;
+            let flags = 0;
             let ret = vpx_codec_enc_init_ver(
                 ctx.as_mut(),
                 iface,
@@ -260,7 +260,8 @@ impl CastVideoEncoder {
                         frame.sz,
                     );
                     let is_keyframe = (frame.flags & 1) != 0;
-                    // println!("CastVideoEncoder: Got VP8 frame packet, {} bytes, keyframe={}, pts={}", frame.sz, is_keyframe, frame.pts);
+                    println!("CastVideoEncoder: Got VP8 frame packet, {} bytes, keyframe={}, pts={}", frame.sz, is_keyframe, frame.pts);
+                    println!("  First 32 bytes: {:02x?}", &vp8_data[..vp8_data.len().min(32)]);
                     vp8_packets.push((vp8_data.to_vec(), is_keyframe));
                 } else {
                     // println!("CastVideoEncoder: Skipping non-frame packet");
@@ -288,10 +289,63 @@ impl CastVideoEncoder {
         let muxer = state.muxer.as_ref().ok_or(nserror::NS_ERROR_NOT_INITIALIZED)?;
 
         let header = muxer.get_header();
+
+        println!("WebM header ({} bytes), first 128:", header.len());
+        for chunk in header.chunks(32).take(4) {
+            println!("  {:02x?}", chunk);
+        }
+
         let mut result = ThinVec::with_capacity(header.len());
         result.extend_from_slice(&header);
 
         Ok(result)
+    }
+
+    xpcom_method!(dump_test_webm => DumpTestWebM(frames: u32));
+    fn dump_test_webm(&self, frames: u32) -> Result<(), nsresult> {
+        println!("DumpTestWebM: dumping {} frames to /tmp/test_webm.webm", frames);
+        let state = self.state.borrow();
+
+        if state.muxer.is_none() || state.vpx_ctx.is_none() {
+            return Err(nserror::NS_ERROR_NOT_INITIALIZED);
+        }
+        drop(state);
+
+        let header = self.get_header()?;
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(&header);
+
+        let state = self.state.borrow();
+        let width = state.width as usize;
+        let height = state.height as usize;
+        drop(state);
+
+        let frame_size = width * height * 4;
+        let mut rgba = vec![0u8; frame_size];
+
+        for y in 0..height {
+            for x in 0..width {
+                let i = (y * width + x) * 4;
+                rgba[i] = (x % 256) as u8;
+                rgba[i + 1] = (y % 256) as u8;
+                rgba[i + 2] = ((x + y) % 256) as u8;
+                rgba[i + 3] = 255;
+            }
+        }
+
+        let rgba_thin = ThinVec::from(rgba);
+        for i in 0..frames {
+            let cluster = self.encode_frame(&rgba_thin, i == 0)?;
+            out.extend_from_slice(&cluster);
+        }
+
+        use std::fs::File;
+        use std::io::Write;
+        let mut f = File::create("/tmp/test_webm.webm").map_err(|_| nserror::NS_ERROR_FAILURE)?;
+        f.write_all(&out).map_err(|_| nserror::NS_ERROR_FAILURE)?;
+        f.flush().map_err(|_| nserror::NS_ERROR_FAILURE)?;
+        println!("DumpTestWebM: wrote /tmp/test_webm.webm ({} bytes)", out.len());
+        Ok(())
     }
 
     xpcom_method!(shutdown => Shutdown());

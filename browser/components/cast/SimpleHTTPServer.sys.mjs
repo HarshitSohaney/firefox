@@ -56,6 +56,11 @@ export class SimpleHTTPServer {
       }
 
       const requestData = scriptableStream.read(available);
+
+      console.log("SimpleHTTPServer: === RAW REQUEST START ===");
+      console.log(requestData.slice(0, 2048));
+      console.log("SimpleHTTPServer: === RAW REQUEST END ===");
+
       const requestLines = requestData.split("\r\n");
       const requestLine = requestLines[0];
       const [method, path] = requestLine.split(" ");

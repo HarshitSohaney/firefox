@@ -11,4 +11,6 @@ interface nsICastVideoEncoder : nsISupports
     Array<octet> getHeader();
 
     void shutdown();
+
+    void dumpTestWebM(in unsigned long frames);
 };

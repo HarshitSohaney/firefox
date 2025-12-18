@@ -39,7 +39,7 @@ export class CastMediaHandler {
     }
   }
 
-  async load(contentId, contentType, streamType = "LIVE", metadata = null) {
+  async load(contentId, contentType, streamType = "BUFFERED", metadata = null) {
     const media = {
       contentId,
       contentType,
