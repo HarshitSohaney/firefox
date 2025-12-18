@@ -41,8 +41,11 @@ export class CastTabSession {
     try {
       console.log("CastTabSession: Requesting display media...");
       this.mediaStream = await this.window.navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "browser" },
+        video: {
+          displaySurface: "browser",
+        },
         audio: false,
+        preferCurrentTab: true,
       });
 
       this.videoElement = this.document.createElementNS(
@@ -109,7 +112,7 @@ export class CastTabSession {
         metadataType: 0,
         title: "Firefox Tab Cast",
       };
-      await this.mediaHandler.load(streamURL, "video/webm", "BUFFERED", metadata);
+      await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
 
       this.setState("streaming");
       console.log("CastTabSession: Tab casting started successfully");
