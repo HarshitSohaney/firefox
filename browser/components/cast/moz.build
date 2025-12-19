@@ -24,4 +24,13 @@ EXTRA_JS_MODULES.cast = [
     "SimpleHTTPServer.sys.mjs",
 ]
 
+UNIFIED_SOURCES += [
+    "src/webm_writer_bridge.cpp",
+]
+
+LOCAL_INCLUDES += [
+    "/dom/media/encoder",
+    "/dom/media/webm",
+]
+
 FINAL_LIBRARY = "browsercomps"

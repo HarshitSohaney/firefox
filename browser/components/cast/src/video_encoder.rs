@@ -1,5 +1,5 @@
 use crate::vpx_ffi::*;
-use crate::webm_muxer::WebMMuxer;
+use crate::webm_writer_ffi::WebMWriter;
 use libc::c_uint;
 use nserror::{nsresult, NS_OK};
 use std::cell::RefCell;
@@ -13,7 +13,8 @@ pub struct CastVideoEncoder {
 
 struct EncoderState {
     vpx_ctx: Option<VpxContext>,
-    muxer: Option<WebMMuxer>,
+    muxer: Option<WebMWriter>,
+    cached_header: Vec<u8>,
     width: u32,
     height: u32,
     frame_count: u64,
@@ -32,6 +33,7 @@ impl CastVideoEncoder {
             state: RefCell::new(EncoderState {
                 vpx_ctx: None,
                 muxer: None,
+                cached_header: Vec::new(),
                 width: 0,
                 height: 0,
                 frame_count: 0,
@@ -111,7 +113,15 @@ impl CastVideoEncoder {
 
             let vpx_ctx = VpxContext { ctx, img, img_buffer };
             state.vpx_ctx = Some(vpx_ctx);
-            state.muxer = Some(WebMMuxer::new(width, height));
+
+            let muxer = WebMWriter::new(width as i32, height as i32)
+                .map_err(|_| nserror::NS_ERROR_FAILURE)?;
+
+            let header = muxer.get_header().map_err(|_| nserror::NS_ERROR_FAILURE)?;
+            eprintln!("CastVideoEncoder::init: Cached header of {} bytes", header.len());
+
+            state.cached_header = header;
+            state.muxer = Some(muxer);
             state.width = width;
             state.height = height;
             state.fps = fps;
@@ -196,9 +206,11 @@ impl CastVideoEncoder {
         }
 
         let mut result = ThinVec::new();
-        let muxer = state.muxer.as_mut().unwrap();
+        let muxer = state.muxer.as_ref().unwrap();
         for (vp8_data, is_keyframe) in vp8_packets {
-            let webm_cluster = muxer.wrap_frame(&vp8_data, timestamp_ms, is_keyframe);
+            let timestamp_us = (timestamp_ms * 1000) as i64;
+            let webm_cluster = muxer.write_frame(&vp8_data, timestamp_us, is_keyframe)
+                .map_err(|_| nserror::NS_ERROR_FAILURE)?;
             result.extend_from_slice(&webm_cluster);
         }
 
@@ -209,26 +221,33 @@ impl CastVideoEncoder {
     xpcom_method!(get_header => GetHeader() -> ThinVec<u8>);
     fn get_header(&self) -> Result<ThinVec<u8>, nsresult> {
         let state = self.state.borrow();
-        let muxer = state.muxer.as_ref().ok_or(nserror::NS_ERROR_NOT_INITIALIZED)?;
 
-        let header = muxer.get_header();
+        if state.cached_header.is_empty() {
+            eprintln!("CastVideoEncoder::get_header: ERROR - No cached header!");
+            return Err(nserror::NS_ERROR_NOT_INITIALIZED);
+        }
 
-        let mut result = ThinVec::with_capacity(header.len());
-        result.extend_from_slice(&header);
+        eprintln!("CastVideoEncoder::get_header: Returning cached header of {} bytes", state.cached_header.len());
+        let mut result = ThinVec::with_capacity(state.cached_header.len());
+        result.extend_from_slice(&state.cached_header);
 
         Ok(result)
     }
 
     xpcom_method!(dump_test_webm => DumpTestWebM(frames: u32));
     fn dump_test_webm(&self, frames: u32) -> Result<(), nsresult> {
+        eprintln!("DumpTestWebM: Starting dump of {} frames to /tmp/test_webm.webm", frames);
+
         let state = self.state.borrow();
 
         if state.muxer.is_none() || state.vpx_ctx.is_none() {
+            eprintln!("DumpTestWebM: ERROR - encoder not initialized");
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);
         }
         drop(state);
 
         let header = self.get_header()?;
+        eprintln!("DumpTestWebM: Got header of {} bytes", header.len());
         let mut out: Vec<u8> = Vec::new();
         out.extend_from_slice(&header);
 
@@ -252,15 +271,28 @@ impl CastVideoEncoder {
 
         let rgba_thin = ThinVec::from(rgba);
         for i in 0..frames {
+            eprintln!("DumpTestWebM: Encoding frame {}/{}", i + 1, frames);
             let cluster = self.encode_frame(&rgba_thin, i == 0)?;
+            eprintln!("DumpTestWebM: Frame {} generated {} bytes", i + 1, cluster.len());
             out.extend_from_slice(&cluster);
         }
 
         use std::fs::File;
         use std::io::Write;
-        let mut f = File::create("/tmp/test_webm.webm").map_err(|_| nserror::NS_ERROR_FAILURE)?;
-        f.write_all(&out).map_err(|_| nserror::NS_ERROR_FAILURE)?;
-        f.flush().map_err(|_| nserror::NS_ERROR_FAILURE)?;
+        eprintln!("DumpTestWebM: Writing {} bytes to /tmp/test_webm.webm", out.len());
+        let mut f = File::create("/tmp/test_webm.webm").map_err(|e| {
+            eprintln!("DumpTestWebM: ERROR - Failed to create file: {:?}", e);
+            nserror::NS_ERROR_FAILURE
+        })?;
+        f.write_all(&out).map_err(|e| {
+            eprintln!("DumpTestWebM: ERROR - Failed to write file: {:?}", e);
+            nserror::NS_ERROR_FAILURE
+        })?;
+        f.flush().map_err(|e| {
+            eprintln!("DumpTestWebM: ERROR - Failed to flush file: {:?}", e);
+            nserror::NS_ERROR_FAILURE
+        })?;
+        eprintln!("DumpTestWebM: Successfully wrote /tmp/test_webm.webm");
         Ok(())
     }
 

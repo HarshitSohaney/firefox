@@ -5,7 +5,7 @@ pub mod message;
 pub mod stream_listener;
 pub mod video_encoder;
 pub mod vpx_ffi;
-pub mod webm_muxer;
+pub mod webm_writer_ffi;
 
 pub use handlers::{ConnectionHandler, HeartbeatHandler, ReceiverHandler};
 pub use message::CastMessage;
