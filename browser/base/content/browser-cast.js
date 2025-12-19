@@ -9,7 +9,7 @@ var gCastUI = {
   _connectedDeviceId: null,
 
   init() {
-    console.log("gCastUI: Starting initialization...");
+    console.warn("gCastUI: Starting initialization...");
 
     try {
       const { gCastService } = ChromeUtils.importESModule(
@@ -22,16 +22,16 @@ var gCastUI = {
       this._castService.addStateListener(this.onStateChange.bind(this));
 
       this._initialized = true;
-      console.log("gCastUI: Initialized successfully");
+      console.warn("gCastUI: Initialized successfully");
     } catch (ex) {
       console.error("gCastUI: Failed to initialize:", ex);
       console.error("gCastUI: Error stack:", ex.stack);
     }
   },
 
-  openPanel() {
-    console.log("gCastUI: openPanel() called");
-    console.log("gCastUI: Initialized?", this._initialized);
+  async openPanel() {
+    console.warn("gCastUI: openPanel() called");
+    console.warn("gCastUI: Initialized?", this._initialized);
 
     if (!this._initialized) {
       console.error("gCastUI: Not initialized yet!");
@@ -39,47 +39,56 @@ var gCastUI = {
       return;
     }
 
-    console.log("gCastUI: Showing IP prompt");
-    const deviceIP = prompt(
-      "Enter Cast device IP address:",
-      "192.168.1.100"
-    );
+    console.warn("gCastUI: Showing IP prompt");
+    const deviceIP = prompt("Enter Cast device IP address:", "192.168.1.100");
 
-    console.log("gCastUI: User entered:", deviceIP);
+    console.warn("gCastUI: User entered:", deviceIP);
 
     if (!deviceIP) {
-      console.log("gCastUI: User cancelled");
+      console.warn("gCastUI: User cancelled");
       return;
     }
 
-    console.log("gCastUI: Adding manual device");
-    const device = this._discovery.addManualDevice(deviceIP);
+    try {
+      console.warn("gCastUI: Adding manual device");
+      const device = await this._discovery.addManualDevice(deviceIP);
 
-    console.log("gCastUI: Starting cast to device:", device.id);
-    this.startCasting(device.id);
+      console.warn(
+        "gCastUI: Device added successfully, starting cast to device:",
+        device.id
+      );
+      this.startCasting(device.id);
+    } catch (error) {
+      console.error("gCastUI: Failed to add device:", error);
+      alert(
+        `Failed to add Cast device: ${error.message}\n\nMake sure the device is reachable and is a valid Cast device.`
+      );
+    }
   },
 
   async startCasting(deviceId) {
     try {
-      console.log("gCastUI: Starting connection test to device", deviceId);
+      console.warn("gCastUI: Starting connection test to device", deviceId);
 
       await this._castService.testConnection(deviceId);
 
-      console.log("gCastUI: Connection test successful!");
+      console.warn("gCastUI: Connection test successful!");
 
       this._connectedDeviceId = deviceId;
       this.showConnectedNotification();
     } catch (ex) {
       console.error("gCastUI: Connection test failed:", ex);
       console.error("gCastUI: Error stack:", ex.stack);
-      alert(`Connection failed: ${ex.message}\n\nCheck Browser Console for details.`);
+      alert(
+        `Connection failed: ${ex.message}\n\nCheck Browser Console for details.`
+      );
     }
   },
 
   showConnectedNotification() {
     const notificationBox = gBrowser.getNotificationBox();
 
-    const notification = notificationBox.appendNotification(
+    notificationBox.appendNotification(
       "cast-connected",
       {
         label: "Cast device connected. Click to cast this tab.",
@@ -104,10 +113,10 @@ var gCastUI = {
 
   async stopCasting() {
     try {
-      console.log("gCastUI: Stopping cast");
+      console.warn("gCastUI: Stopping cast");
       await this._castService.stopCasting();
       await this._castService.stopTabCasting();
-      console.log("gCastUI: Casting stopped");
+      console.warn("gCastUI: Casting stopped");
     } catch (ex) {
       console.error("gCastUI: Failed to stop casting:", ex);
     }
@@ -115,23 +124,25 @@ var gCastUI = {
 
   async startTabCasting(deviceId) {
     try {
-      console.log("gCastUI: Starting tab casting to device", deviceId);
+      console.warn("gCastUI: Starting tab casting to device", deviceId);
 
       const browser = gBrowser.selectedBrowser;
       const result = await this._castService.startTabCasting(
         deviceId,
         browser,
         window,
-        { fps: 10, quality: 0.8 }
+        { fps: 15, bitrate: 2500000 }
       );
 
-      console.log("gCastUI: Tab casting started:", result);
+      console.warn("gCastUI: Tab casting started:", result);
       this.showCastingNotification();
 
       return result;
     } catch (ex) {
       console.error("gCastUI: Tab casting failed:", ex);
-      alert(`Tab casting failed: ${ex.message}\n\nCheck Browser Console for details.`);
+      alert(
+        `Tab casting failed: ${ex.message}\n\nCheck Browser Console for details.`
+      );
       throw ex;
     }
   },
@@ -139,12 +150,13 @@ var gCastUI = {
   showCastingNotification() {
     const notificationBox = gBrowser.getNotificationBox();
 
-    const connectedNotif = notificationBox.getNotificationWithValue("cast-connected");
+    const connectedNotif =
+      notificationBox.getNotificationWithValue("cast-connected");
     if (connectedNotif) {
       notificationBox.removeNotification(connectedNotif);
     }
 
-    const notification = notificationBox.appendNotification(
+    notificationBox.appendNotification(
       "cast-active",
       {
         label: "Casting tab to device",
@@ -161,18 +173,20 @@ var gCastUI = {
     );
   },
 
-  onStateChange(state, session) {
-    console.log("gCastUI: Cast state changed to", state);
+  onStateChange(state, _session) {
+    console.warn("gCastUI: Cast state changed to", state);
 
     if (state === "idle" || state === "error") {
       const notificationBox = gBrowser.getNotificationBox();
 
-      const activeNotif = notificationBox.getNotificationWithValue("cast-active");
+      const activeNotif =
+        notificationBox.getNotificationWithValue("cast-active");
       if (activeNotif) {
         notificationBox.removeNotification(activeNotif);
       }
 
-      const connectedNotif = notificationBox.getNotificationWithValue("cast-connected");
+      const connectedNotif =
+        notificationBox.getNotificationWithValue("cast-connected");
       if (connectedNotif) {
         notificationBox.removeNotification(connectedNotif);
       }

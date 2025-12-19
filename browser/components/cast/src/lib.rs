@@ -1,5 +1,4 @@
 pub mod cast_device;
-pub mod cert_override;
 pub mod handlers;
 pub mod message;
 pub mod stream_listener;

@@ -1,13 +1,20 @@
-/**
- * JavaScript wrapper for the Rust XPCOM Cast device component.
- * Provides a Promise-based API over the callback-based XPCOM interface.
- */
-
 import {
   setInterval,
   clearInterval,
+  clearTimeout,
   setTimeout,
 } from "resource://gre/modules/Timer.sys.mjs";
+
+const lazy = {};
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
+  return console.createInstance({
+    prefix: "Cast:Device",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
+  });
+});
 
 export class CastDevice {
   constructor(id, address, port = 8009) {
@@ -17,12 +24,9 @@ export class CastDevice {
     this.friendlyName = address;
     this.state = "disconnected";
 
-    // Create the Rust XPCOM component
     this._xpcomDevice = Cc["@mozilla.org/cast/device;1"].createInstance(
       Ci.nsICastDevice
     );
-
-    // Set up callback to receive events from Rust
     this._xpcomDevice.callback = this._createCallback();
 
     this._heartbeatTimer = null;
@@ -32,68 +36,190 @@ export class CastDevice {
   }
 
   _createCallback() {
-    const self = this;
     return {
       QueryInterface: ChromeUtils.generateQI(["nsICastDeviceCallback"]),
 
-      onStateChanged(state) {
-        console.log(`CastDevice: State changed to ${state}`);
-        self.state = state;
-        self._emit("stateChanged", state);
+      onStateChanged: state => {
+        this.state = state;
+        lazy.logConsole.debug(`State changed: ${state}`);
+        this._emit("stateChanged", state);
 
-        // Resolve connect promise when we reach "connected" state
-        if (state === "connected" && self._connectResolve) {
-          const resolve = self._connectResolve;
-          self._connectResolve = null;
-          self._connectReject = null;
-          resolve();
-        }
-
-        // Reject connect promise on error
-        if (state === "error" && self._connectReject) {
-          const reject = self._connectReject;
-          self._connectResolve = null;
-          self._connectReject = null;
-          reject(new Error("Connection failed"));
+        if (state === "connected" && this._connectResolve) {
+          lazy.logConsole.debug(`Connection successful to ${this.address}:${this.port}`);
+          this._connectResolve();
+          this._connectResolve = null;
+          this._connectReject = null;
+        } else if (state === "error" && this._connectReject) {
+          lazy.logConsole.warn(`Connection failed to ${this.address}:${this.port}`);
+          this._connectReject(new Error("Connection failed"));
+          this._connectResolve = null;
+          this._connectReject = null;
         }
       },
 
-      onMessage(namespace, payload) {
-        console.log(`CastDevice: Received message on ${namespace}`);
-        self._emit("message", { namespace, payload: JSON.parse(payload) });
+      onMessage: (namespace, payload) => {
+        const parsed = JSON.parse(payload);
+        lazy.logConsole.debug(`<- Received [${namespace}]:`, parsed);
+        this._emit("message", { namespace, payload: parsed });
       },
 
-      onError(error) {
-        console.error(`CastDevice: Error: ${error}`);
-        self._emit("error", new Error(error));
-
-        if (self._connectReject) {
-          const reject = self._connectReject;
-          self._connectResolve = null;
-          self._connectReject = null;
-          reject(new Error(error));
+      onError: error => {
+        lazy.logConsole.error(`Error: ${error}`);
+        this._emit("error", new Error(error));
+        if (this._connectReject) {
+          this._connectReject(new Error(error));
+          this._connectResolve = null;
+          this._connectReject = null;
         }
       },
     };
   }
 
-  async connect() {
-    console.log(`CastDevice: Connecting to ${this.address}:${this.port}`);
+  async addCertificateOverride() {
+    lazy.logConsole.debug(`Adding certificate override for ${this.address}:${this.port}`);
+    await this._addCastCertOverride();
+    lazy.logConsole.debug(`Certificate override added successfully`);
+  }
 
+  async connect() {
+    return this._attemptConnect();
+  }
+
+  async _addCastCertOverride() {
+    const overrideService = Cc[
+      "@mozilla.org/security/certoverride;1"
+    ].getService(Ci.nsICertOverrideService);
+
+    const cert = await this._getCertForHost(this.address, this.port);
+
+    if (!cert) {
+      lazy.logConsole.error(`Failed to retrieve certificate for ${this.address}:${this.port}`);
+      throw new Error("Could not retrieve certificate for Cast device");
+    }
+
+    lazy.logConsole.debug("Verifying certificate is self-signed");
+    const issuer = cert.issuerName;
+    const subject = cert.subjectName;
+
+    if (issuer !== subject) {
+      lazy.logConsole.warn(`Certificate verification failed: issuer=${issuer}, subject=${subject}`);
+      throw new Error("Certificate is not self-signed - not a valid Cast device");
+    }
+
+    lazy.logConsole.debug("Certificate verified as self-signed");
+    overrideService.rememberValidityOverride(
+      this.address,
+      this.port,
+      {},
+      cert,
+      true
+    );
+  }
+
+  async _getCertForHost(hostname, port) {
+    lazy.logConsole.debug(`Fetching certificate from ${hostname}:${port}`);
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      let timeout;
+      let channel;
+
+      const resolveOnce = cert => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        lazy.logConsole.debug("Certificate retrieved successfully");
+        resolve(cert);
+      };
+
+      const rejectOnce = error => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        lazy.logConsole.error(`Failed to get certificate: ${error}`);
+        reject(error);
+      };
+
+      timeout = setTimeout(() => {
+        if (channel) {
+          channel.cancel(Cr.NS_BINDING_ABORTED);
+        }
+        rejectOnce(new Error("Timeout fetching certificate (10s)"));
+      }, 10000);
+
+      try {
+        const url = `https://${hostname}:${port}/`;
+        lazy.logConsole.debug("Creating HTTPS request to:", url);
+
+        const uri = Services.io.newURI(url);
+        channel = Services.io.newChannelFromURI(
+          uri,
+          null,
+          Services.scriptSecurityManager.getSystemPrincipal(),
+          null,
+          Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
+          Ci.nsIContentPolicy.TYPE_OTHER
+        );
+
+        const listener = {
+          QueryInterface: ChromeUtils.generateQI(["nsIStreamListener"]),
+
+          onStartRequest(aRequest) {},
+
+          onDataAvailable(aRequest, aInputStream, aOffset, aCount) {},
+
+          onStopRequest(aRequest, aStatus) {
+            try {
+              const securityInfo = aRequest.securityInfo;
+
+              if (securityInfo?.serverCert) {
+                lazy.logConsole.debug("Found server certificate");
+                resolveOnce(securityInfo.serverCert);
+                return;
+              }
+
+              lazy.logConsole.warn(`No certificate available (status: 0x${aStatus.toString(16)})`);
+              rejectOnce(
+                new Error(
+                  `No certificate available (status: 0x${aStatus.toString(16)})`
+                )
+              );
+            } catch (e) {
+              lazy.logConsole.error(`Exception in onStopRequest: ${e}`);
+              rejectOnce(e);
+            }
+          },
+        };
+
+        channel.asyncOpen(listener);
+      } catch (e) {
+        lazy.logConsole.error(`Exception creating channel: ${e}`);
+        rejectOnce(e);
+      }
+    });
+  }
+
+  async _attemptConnect() {
+    lazy.logConsole.debug(`Connecting to ${this.address}:${this.port}`);
     return new Promise((resolve, reject) => {
       this._connectResolve = resolve;
       this._connectReject = reject;
 
       try {
-        // Call Rust XPCOM connect - this is synchronous but connection happens async
         this._xpcomDevice.connect(this.address, this.port);
-
-        // Start heartbeat from JavaScript side
         this._startHeartbeat();
       } catch (error) {
         this._connectResolve = null;
         this._connectReject = null;
-        console.error("CastDevice: Connect call failed:", error);
+        lazy.logConsole.error(`Connect call failed: ${error}`);
         reject(error);
       }
     });
@@ -101,77 +227,70 @@ export class CastDevice {
 
   _startHeartbeat() {
     if (this._heartbeatTimer) {
-      return; // Already started
+      return;
     }
 
     this._heartbeatTimer = setInterval(() => {
       try {
-        const payload = JSON.stringify({ type: "PING" });
         this._xpcomDevice.sendMessage(
           "urn:x-cast:com.google.cast.tp.heartbeat",
-          payload
+          JSON.stringify({ type: "PING" })
         );
       } catch (error) {
-        console.error("CastDevice: Heartbeat failed:", error);
+        console.error("Cast heartbeat failed:", error);
       }
     }, 5000);
-
-    console.log("CastDevice: Started heartbeat");
   }
 
-  async disconnect() {
-    console.log("CastDevice: Disconnecting");
-
+  disconnect() {
+    lazy.logConsole.debug(`Disconnecting from ${this.address}:${this.port}`);
     if (this._heartbeatTimer) {
       clearInterval(this._heartbeatTimer);
       this._heartbeatTimer = null;
     }
 
-    try {
-      this._xpcomDevice.disconnect();
-    } catch (error) {
-      console.error("CastDevice: Disconnect failed:", error);
-    }
-
+    this._xpcomDevice.disconnect();
     this.state = "disconnected";
     this._emit("stateChanged", this.state);
+    lazy.logConsole.debug("Disconnected successfully");
   }
 
-  async sendMessage(namespace, payload) {
-    console.log(`CastDevice: Sending message to ${namespace}`);
+  sendMessage(namespace, payload) {
     try {
-      this._xpcomDevice.sendMessage(namespace, payload);
-    } catch (error) {
-      console.error("CastDevice: sendMessage failed:", error);
-      throw error;
+      const parsed = JSON.parse(payload);
+      lazy.logConsole.debug(`-> Sending [${namespace}]:`, parsed);
+    } catch (e) {
+      lazy.logConsole.debug(`-> Sending [${namespace}]: ${payload}`);
     }
+    this._xpcomDevice.sendMessage(namespace, payload);
+  }
+
+  sendMessageTo(destinationId, namespace, payload) {
+    try {
+      const parsed = JSON.parse(payload);
+      lazy.logConsole.debug(`-> Sending to ${destinationId} [${namespace}]:`, parsed);
+    } catch (e) {
+      lazy.logConsole.debug(`-> Sending to ${destinationId} [${namespace}]: ${payload}`);
+    }
+    this._xpcomDevice.sendMessageTo(destinationId, namespace, payload);
   }
 
   async launchApp(appId = "CC1AD845") {
-    console.log(`CastDevice: Launching app ${appId}`);
+    lazy.logConsole.debug(`Launching app: ${appId}`);
     const payload = JSON.stringify({
       type: "LAUNCH",
       requestId: Date.now(),
       appId,
     });
 
-    try {
-      await this.sendMessage("urn:x-cast:com.google.cast.receiver", payload);
-
-      console.log("CastDevice: Waiting for transport ID...");
-      const transportId = await this._waitForTransportId(5000);
-
-      if (transportId) {
-        console.log(`CastDevice: Got transport ID: ${transportId}`);
-        return { success: true, transportId };
-      } else {
-        console.warn("CastDevice: Timeout waiting for transport ID");
-        return { success: true };
-      }
-    } catch (error) {
-      console.error("CastDevice: Launch app failed:", error);
-      throw error;
+    this.sendMessage("urn:x-cast:com.google.cast.receiver", payload);
+    const transportId = await this._waitForTransportId(5000);
+    if (transportId) {
+      lazy.logConsole.debug(`App launched successfully, transportId: ${transportId}`);
+    } else {
+      lazy.logConsole.warn(`App launch failed: no transportId received`);
     }
+    return { success: true, transportId };
   }
 
   async _waitForTransportId(timeoutMs) {
@@ -207,14 +326,19 @@ export class CastDevice {
   }
 
   _emit(event, data) {
-    if (this._eventListeners.has(event)) {
-      for (const listener of this._eventListeners.get(event)) {
+    const listeners = this._eventListeners.get(event);
+    if (listeners) {
+      for (const listener of listeners) {
         try {
           listener(data);
         } catch (error) {
-          console.error("CastDevice: Error in event listener:", error);
+          console.error("Cast event listener error:", error);
         }
       }
     }
+  }
+
+  getAppTransportId() {
+    return this._xpcomDevice.getAppTransportId() || null;
   }
 }

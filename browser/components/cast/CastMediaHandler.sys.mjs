@@ -1,3 +1,14 @@
+const lazy = {};
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
+  return console.createInstance({
+    prefix: "Cast:Media",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
+  });
+});
+
 export class CastMediaHandler {
   static NAMESPACE = "urn:x-cast:com.google.cast.media";
 
@@ -27,18 +38,20 @@ export class CastMediaHandler {
     const payload = JSON.stringify(message);
 
     try {
+      lazy.logConsole.debug(`Sending media command: ${command}`);
       await this.castDevice.sendMessage(
         CastMediaHandler.NAMESPACE,
         payload
       );
       return requestId;
     } catch (e) {
-      console.error(`CastMediaHandler: Error sending ${command}:`, e);
+      lazy.logConsole.error(`Error sending ${command}:`, e);
       throw e;
     }
   }
 
   async load(contentId, contentType, streamType = "LIVE", metadata = null) {
+    lazy.logConsole.debug(`Loading media: ${contentId}`);
     const media = {
       contentId,
       contentType,
@@ -55,10 +68,12 @@ export class CastMediaHandler {
 
     const loadCommand = {
       media,
-      autoplay: false,
+      autoplay: true,
     };
 
-    return await this.sendMediaCommand("LOAD", loadCommand);
+    const requestId = await this.sendMediaCommand("LOAD", loadCommand);
+    lazy.logConsole.debug(`Media load sent, requestId: ${requestId}`);
+    return requestId;
   }
 
   async play() {
@@ -77,7 +92,8 @@ export class CastMediaHandler {
 
   async stop() {
     if (!this.mediaSessionId) {
-      throw new Error("No active media session");
+      lazy.logConsole.debug("No active media session to stop");
+      return;
     }
     return await this.sendMediaCommand("STOP");
   }
@@ -99,11 +115,13 @@ export class CastMediaHandler {
 
       if (message.status && message.status.length > 0) {
         const status = message.status[0];
+        lazy.logConsole.debug(`Media status: ${status.playerState}`);
         if (status.mediaSessionId) {
           this.mediaSessionId = status.mediaSessionId;
         }
 
         if (status.idleReason === "FINISHED" || status.idleReason === "ERROR") {
+          lazy.logConsole.debug(`Media idle reason: ${status.idleReason}`);
           this.mediaSessionId = null;
         }
 
@@ -115,7 +133,7 @@ export class CastMediaHandler {
         };
       }
     } catch (e) {
-      console.error("CastMediaHandler: Error parsing MEDIA_STATUS:", e);
+      lazy.logConsole.error("Error parsing MEDIA_STATUS:", e);
     }
 
     return null;

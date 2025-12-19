@@ -1,18 +1,20 @@
 import { CastDevice } from "resource:///modules/cast/CastDevice.sys.mjs";
-import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 
 const lazy = {};
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
+  return console.createInstance({
+    prefix: "Cast:Service",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
+  });
+});
 
 ChromeUtils.defineESModuleGetters(lazy, {
   CastTabSession: "resource:///modules/cast/CastTabSession.sys.mjs",
 });
-
-XPCOMUtils.defineLazyServiceGetter(
-  lazy,
-  "certOverrideService",
-  "@mozilla.org/security/certoverride;1",
-  Ci.nsICertOverrideService
-);
 
 class CastService {
   constructor() {
@@ -24,46 +26,13 @@ class CastService {
   }
 
   init() {
-    if (this._initialized) {
-      return;
-    }
-
-    console.log("CastService: Initializing");
-
-    try {
-      // CRITICAL: Set XPCSHELL_TEST_PROFILE_DIR *BEFORE* calling cert override service
-      // This enables setDisableAllSecurityChecksAndLetAttackersInterceptMyData
-      const env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-      env.set("XPCSHELL_TEST_PROFILE_DIR", "1");
-
-      Services.prefs.setBoolPref(
-        "network.stricttransportsecurity.preloadlist",
-        false
-      );
-      Services.prefs.setIntPref("security.cert_pinning.enforcement_level", 0);
-
-      lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
-        true
-      );
-
-      console.log(
-        "CastService: Certificate validation disabled for Cast development"
-      );
-      console.warn(
-        "WARNING: TLS certificate validation is disabled! This is for Cast development only."
-      );
-    } catch (e) {
-      console.error("CastService: Failed to disable cert validation:", e);
-    }
-
     this._initialized = true;
   }
 
   getDeviceDiscovery() {
     return {
-      addManualDevice: ipAddress => {
+      addManualDevice: async ipAddress => {
+        lazy.logConsole.debug(`Adding manual device: ${ipAddress}`);
         const deviceId = `manual-${ipAddress}`;
         const device = new CastDevice(deviceId, ipAddress);
 
@@ -72,42 +41,51 @@ class CastService {
         });
 
         device.addEventListener("error", error => {
-          console.error("CastService: Device error:", error);
+          lazy.logConsole.error(`Device error for ${ipAddress}:`, error);
           this._notifyStateListeners("error", device);
         });
 
         this._devices.set(deviceId, device);
-        console.log("CastService: Added manual device:", deviceId);
+
+        try {
+          await device.addCertificateOverride();
+          lazy.logConsole.debug(`Manual device added successfully: ${ipAddress}`);
+        } catch (error) {
+          lazy.logConsole.error(`Failed to add device ${ipAddress}: ${error.message}`);
+          this._devices.delete(deviceId);
+          throw new Error(
+            `Failed to validate Cast device certificate: ${error.message}`
+          );
+        }
 
         return device;
       },
 
       removeDevice: deviceId => {
+        lazy.logConsole.debug(`Removing device: ${deviceId}`);
         const device = this._devices.get(deviceId);
         if (device) {
           device.disconnect();
           this._devices.delete(deviceId);
-          console.log("CastService: Removed device:", deviceId);
+          lazy.logConsole.debug(`Device removed: ${deviceId}`);
+        } else {
+          lazy.logConsole.warn(`Device not found: ${deviceId}`);
         }
       },
     };
   }
 
   async testConnection(deviceId) {
+    lazy.logConsole.debug(`Testing connection to device: ${deviceId}`);
     const device = this._devices.get(deviceId);
     if (!device) {
+      lazy.logConsole.error(`Test connection failed: device not found (${deviceId})`);
       throw new Error("Device not found");
     }
 
-    console.log("CastService: Testing connection to", deviceId);
-
     try {
       await device.connect();
-      console.log("CastService: Connection successful!");
-
-      console.log("CastService: Launching DefaultMediaReceiver...");
       const launchResult = await device.launchApp("CC1AD845");
-      console.log("CastService: Launch result:", launchResult);
 
       this._activeSession = {
         device,
@@ -115,10 +93,10 @@ class CastService {
       };
 
       this._notifyStateListeners("connected", device);
-
+      lazy.logConsole.debug(`Test connection successful for device: ${deviceId}`);
       return true;
     } catch (error) {
-      console.error("CastService: Connection failed:", error);
+      lazy.logConsole.error(`Test connection failed for device ${deviceId}:`, error);
       this._notifyStateListeners("error", device);
       throw error;
     }
@@ -126,13 +104,50 @@ class CastService {
 
   async stopCasting() {
     if (!this._activeSession) {
+      lazy.logConsole.debug("stopCasting: no active session");
       return;
     }
 
+    lazy.logConsole.debug("Stopping casting session");
     const { device } = this._activeSession;
 
     try {
-      await device.disconnect();
+      const stopPayload = JSON.stringify({
+        type: "STOP",
+        requestId: Date.now(),
+      });
+
+      try {
+        device.sendMessage("urn:x-cast:com.google.cast.receiver", stopPayload);
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (e) {
+        lazy.logConsole.error("Error sending STOP:", e);
+      }
+
+      const appTransportId = device.getAppTransportId();
+      if (appTransportId) {
+        device.sendMessageTo(
+          appTransportId,
+          "urn:x-cast:com.google.cast.tp.connection",
+          JSON.stringify({ type: "CLOSE" })
+        );
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      device.sendMessageTo(
+        "receiver-0",
+        "urn:x-cast:com.google.cast.tp.connection",
+        JSON.stringify({ type: "CLOSE" })
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (e) {
+      lazy.logConsole.error("Error during disconnect sequence:", e);
+    }
+
+    try {
+      device.disconnect();
+      lazy.logConsole.debug("Casting stopped successfully");
     } finally {
       this._activeSession = null;
       this._notifyStateListeners("idle", null);
@@ -140,54 +155,56 @@ class CastService {
   }
 
   async startTabCasting(deviceId, browser, window, options = {}) {
+    lazy.logConsole.debug(`Starting tab casting for device: ${deviceId}`);
     const device = this._devices.get(deviceId);
     if (!device) {
+      lazy.logConsole.error(`Tab casting failed: device not found (${deviceId})`);
       throw new Error("Device not found");
     }
 
     if (device.state !== "connected") {
+      lazy.logConsole.debug("Device not connected, connecting first");
       await device.connect();
     }
 
     if (this._tabSession && this._tabSession.isActive()) {
+      lazy.logConsole.warn("Tab casting already in progress");
       throw new Error("Tab casting already in progress");
     }
 
-    console.log("CastService: Launching DefaultMediaReceiver...");
-    const launchResult = await device.launchApp("CC1AD845");
-    console.log("CastService: Launch result:", launchResult);
-
-    this._activeSession = {
-      device,
-      sessionId: launchResult.status?.applications?.[0]?.sessionId,
-    };
-
-    console.log("CastService: Starting tab casting...");
+    if (!this._activeSession) {
+      lazy.logConsole.debug("No active session, launching app");
+      const launchResult = await device.launchApp("CC1AD845");
+      this._activeSession = {
+        device,
+        sessionId: launchResult.status?.applications?.[0]?.sessionId,
+      };
+    }
 
     this._tabSession = new lazy.CastTabSession(device, window);
 
     try {
       const result = await this._tabSession.start(browser, options);
-      console.log("CastService: Tab casting started successfully");
       this._notifyStateListeners("casting", device);
+      lazy.logConsole.debug("Tab casting started successfully");
       return result;
     } catch (error) {
-      console.error("CastService: Failed to start tab casting:", error);
+      lazy.logConsole.error("Tab casting failed:", error);
       this._tabSession = null;
-      this._activeSession = null;
       throw error;
     }
   }
 
   async stopTabCasting() {
     if (!this._tabSession) {
+      lazy.logConsole.debug("stopTabCasting: no tab session");
       return;
     }
 
-    console.log("CastService: Stopping tab casting...");
-
+    lazy.logConsole.debug("Stopping tab casting");
     try {
       await this._tabSession.stop();
+      lazy.logConsole.debug("Tab casting stopped successfully");
     } finally {
       this._tabSession = null;
       this._notifyStateListeners("connected", null);
@@ -217,28 +234,19 @@ class CastService {
   }
 
   cleanup() {
+    lazy.logConsole.debug("Cleaning up Cast service");
     for (const [deviceId, device] of this._devices) {
       try {
         device.disconnect();
       } catch (e) {
-        console.warn(`CastService: Error cleaning up device ${deviceId}:`, e);
+        lazy.logConsole.warn(`Device cleanup error (${deviceId}):`, e);
       }
     }
 
     this._devices.clear();
     this._activeSession = null;
     this._tabSession = null;
-
-    try {
-      lazy.certOverrideService.setDisableAllSecurityChecksAndLetAttackersInterceptMyData(
-        false
-      );
-      console.log("CastService: Certificate validation re-enabled");
-    } catch (e) {
-      console.warn("CastService: Could not re-enable cert validation:", e);
-    }
-
-    console.log("CastService: Cleanup complete");
+    lazy.logConsole.debug("Cast service cleanup complete");
   }
 }
 

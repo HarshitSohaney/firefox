@@ -20,6 +20,8 @@ EXTRA_JS_MODULES.cast = [
     "CastDevice.sys.mjs",
     "CastMediaHandler.sys.mjs",
     "CastServiceWrapper.sys.mjs",
+    "CastTabChild.sys.mjs",
+    "CastTabParent.sys.mjs",
     "CastTabSession.sys.mjs",
     "SimpleHTTPServer.sys.mjs",
 ]

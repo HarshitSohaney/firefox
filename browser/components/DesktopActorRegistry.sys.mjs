@@ -294,6 +294,17 @@ let JSWINDOWACTORS = {
     messageManagerGroups: ["browsers"],
   },
 
+  CastTab: {
+    parent: {
+      esModuleURI: "resource:///modules/cast/CastTabParent.sys.mjs",
+    },
+    child: {
+      esModuleURI: "resource:///modules/cast/CastTabChild.sys.mjs",
+    },
+
+    messageManagerGroups: ["browsers"],
+  },
+
   CanonicalURL: {
     parent: {
       esModuleURI: "resource:///actors/CanonicalURLParent.sys.mjs",

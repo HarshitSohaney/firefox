@@ -53,6 +53,14 @@ interface nsICastDevice : nsISupports
   void sendMessage(in AUTF8String namespace, in AUTF8String payload);
 
   /**
+   * Send a Cast protocol message to a specific destination.
+   * @param destinationId Destination ID (e.g. "receiver-0" or app transport ID)
+   * @param namespace Cast protocol namespace
+   * @param payload JSON payload string
+   */
+  void sendMessageTo(in AUTF8String destinationId, in AUTF8String namespace, in AUTF8String payload);
+
+  /**
    * Set callback for device events.
    */
   attribute nsICastDeviceCallback callback;

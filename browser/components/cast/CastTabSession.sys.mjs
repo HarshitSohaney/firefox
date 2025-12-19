@@ -1,10 +1,19 @@
-import {
-  setInterval,
-  clearInterval,
-} from "resource://gre/modules/Timer.sys.mjs";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { SimpleHTTPServer } from "resource:///modules/cast/SimpleHTTPServer.sys.mjs";
 
 const lazy = {};
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
+  return console.createInstance({
+    prefix: "Cast:TabSession",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
+  });
+});
 
 ChromeUtils.defineESModuleGetters(lazy, {
   CastMediaHandler: "resource:///modules/cast/CastMediaHandler.sys.mjs",
@@ -15,23 +24,26 @@ export class CastTabSession {
     this.castDevice = castDevice;
     this.window = window;
     this.document = window.document;
-    this.encoder = null;
     this.server = null;
     this.mediaHandler = null;
-    this.mediaStream = null;
     this.state = "idle";
     this.browser = null;
-    this.videoElement = null;
+    this.streamConnection = null;
+    this.tabCloseListener = null;
+    this.mediaRecorder = null;
+    this.mediaStream = null;
     this.canvas = null;
     this.ctx = null;
     this.captureInterval = null;
-    this.streamConnection = null;
     this.width = 0;
     this.height = 0;
+    this.isCapturing = false;
+    this.lastCaptureTime = 0;
   }
 
   async start(browser, options = {}) {
     if (this.state !== "idle") {
+      lazy.logConsole.warn(`Cannot start session in state: ${this.state}`);
       throw new Error(`Cannot start session in state: ${this.state}`);
     }
 
@@ -39,46 +51,71 @@ export class CastTabSession {
     this.setState("starting");
 
     try {
-      this.mediaStream = await this.window.navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "browser",
-        },
-        audio: false,
-        preferCurrentTab: true,
-      });
+      lazy.logConsole.debug("Setting up optimized canvas capture for tab");
 
-      this.videoElement = this.document.createElementNS(
-        "http://www.w3.org/1999/xhtml",
-        "video"
-      );
-      this.videoElement.srcObject = this.mediaStream;
-      this.videoElement.muted = true;
-      this.videoElement.autoplay = true;
+      this.width = browser.clientWidth || 1280;
+      this.height = browser.clientHeight || 720;
 
-      await new Promise(resolve => {
-        this.videoElement.onloadedmetadata = resolve;
-      });
+      const maxWidth = 1280;
+      const maxHeight = 720;
+      let canvasWidth = this.width;
+      let canvasHeight = this.height;
 
-      this.width = this.videoElement.videoWidth || 1280;
-      this.height = this.videoElement.videoHeight || 720;
+      if (canvasWidth > maxWidth || canvasHeight > maxHeight) {
+        const widthRatio = maxWidth / canvasWidth;
+        const heightRatio = maxHeight / canvasHeight;
+        const scaleRatio = Math.min(widthRatio, heightRatio);
+        canvasWidth = Math.floor(canvasWidth * scaleRatio);
+        canvasHeight = Math.floor(canvasHeight * scaleRatio);
+        lazy.logConsole.debug(
+          `Scaling down from ${this.width}x${this.height} to ${canvasWidth}x${canvasHeight}`
+        );
+      }
 
       this.canvas = this.document.createElementNS(
         "http://www.w3.org/1999/xhtml",
         "canvas"
       );
-      this.canvas.width = this.width;
-      this.canvas.height = this.height;
-      this.ctx = this.canvas.getContext("2d");
+      this.canvas.width = canvasWidth;
+      this.canvas.height = canvasHeight;
+      this.ctx = this.canvas.getContext("2d", {
+        alpha: false,
+        willReadFrequently: false,
+      });
 
-      this.encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
-        Ci.nsICastVideoEncoder
+      const fps = options.fps || 15;
+      const videoBitsPerSecond = options.bitrate || 2500000;
+
+      lazy.logConsole.debug(
+        `Canvas ${canvasWidth}x${canvasHeight} @ ${fps}fps, ${Math.floor(videoBitsPerSecond / 1000)}kbps`
       );
-      this.encoder.init(
-        this.width,
-        this.height,
-        options.bitrate || 2000000,
-        options.fps || 15
-      );
+
+      this.mediaStream = this.canvas.captureStream(fps);
+
+      this.mediaRecorder = new this.window.MediaRecorder(this.mediaStream, {
+        mimeType: "video/webm;codecs=vp8",
+        videoBitsPerSecond,
+      });
+
+      this.mediaRecorder.ondataavailable = event => {
+        if (event.data && event.data.size > 0 && this.streamConnection) {
+          event.data.arrayBuffer().then(buffer => {
+            try {
+              const data = new Uint8Array(buffer);
+              this.writeChunk(this.streamConnection.outputStream, data);
+            } catch (e) {
+              lazy.logConsole.error("Error writing chunk:", e);
+            }
+          });
+        }
+      };
+
+      this.mediaRecorder.onerror = event => {
+        lazy.logConsole.error("MediaRecorder error:", event);
+        this.setState("error");
+      };
+
+      this.mediaRecorder.start(100);
 
       this.server = new SimpleHTTPServer();
       this.server.registerPathHandler("/stream.webm", connection => {
@@ -91,13 +128,19 @@ export class CastTabSession {
         ? `http://${hostname}:${port}/stream.webm`
         : `http://${this.server.getLocalIP(this.castDevice.address)}:${port}/stream.webm`;
 
-      console.log(`CastTabSession: Stream URL: ${streamURL} (using ${hostname ? 'system hostname' : 'fallback IP'})`);
+      lazy.logConsole.debug(
+        `Stream URL: ${streamURL} (using ${hostname ? "system hostname" : "fallback IP"})`
+      );
 
-      const fps = options.fps || 15;
-      const intervalMs = 1000 / fps;
-      this.captureInterval = setInterval(() => {
-        this.captureAndEncode();
-      }, intervalMs);
+      const gBrowser = this.window.gBrowser;
+      this.tabCloseListener = event => {
+        const tab = event.target;
+        if (tab.linkedBrowser === this.browser) {
+          lazy.logConsole.debug("Tab closing, stopping cast");
+          this.stop();
+        }
+      };
+      gBrowser.tabContainer.addEventListener("TabClose", this.tabCloseListener);
 
       this.mediaHandler = new lazy.CastMediaHandler(this.castDevice);
 
@@ -113,6 +156,25 @@ export class CastTabSession {
       };
       await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
 
+      const intervalMs = 1000 / fps;
+      this.captureInterval = this.window.setInterval(() => {
+        const now = Date.now();
+        if (now - this.lastCaptureTime < intervalMs * 0.9) {
+          return;
+        }
+
+        if (this.window.requestIdleCallback) {
+          this.window.requestIdleCallback(
+            () => this.captureFrame(),
+            { timeout: intervalMs / 2 }
+          );
+        } else {
+          this.captureFrame();
+        }
+      }, intervalMs);
+
+      lazy.logConsole.debug("Started optimized capture loop");
+
       this.setState("streaming");
 
       return {
@@ -120,7 +182,7 @@ export class CastTabSession {
         state: this.state,
       };
     } catch (error) {
-      console.error("CastTabSession: Error starting session:", error);
+      lazy.logConsole.error("Error starting session:", error);
       this.setState("error");
       await this.cleanup();
       throw error;
@@ -129,6 +191,8 @@ export class CastTabSession {
 
   handleStreamRequest(connection) {
     try {
+      lazy.logConsole.debug("Stream connection established");
+
       const headers =
         "HTTP/1.1 200 OK\r\n" +
         "Content-Type: video/webm\r\n" +
@@ -143,12 +207,10 @@ export class CastTabSession {
 
       connection.outputStream.write(headers, headers.length);
 
-      const header = this.encoder.getHeader();
-      this.writeChunk(connection.outputStream, header);
-
       this.streamConnection = connection;
+      lazy.logConsole.debug("Ready to stream MediaRecorder chunks");
     } catch (e) {
-      console.error("CastTabSession: Error in handleStreamRequest:", e);
+      lazy.logConsole.error("Error in handleStreamRequest:", e);
       if (this.server) {
         this.server.closeConnection(connection);
       }
@@ -161,8 +223,9 @@ export class CastTabSession {
 
     outputStream.write(chunkHeader, chunkHeader.length);
 
-    const binaryStream = Cc["@mozilla.org/binaryoutputstream;1"]
-      .createInstance(Ci.nsIBinaryOutputStream);
+    const binaryStream = Cc["@mozilla.org/binaryoutputstream;1"].createInstance(
+      Ci.nsIBinaryOutputStream
+    );
     binaryStream.setOutputStream(outputStream);
     binaryStream.writeByteArray(data);
 
@@ -171,49 +234,67 @@ export class CastTabSession {
     outputStream.flush();
   }
 
-  captureAndEncode() {
-    if (!this.canvas || !this.ctx || !this.videoElement || !this.encoder) {
+  async captureFrame() {
+    if (!this.canvas || !this.ctx || !this.browser) {
       return;
     }
 
+    if (this.isCapturing) {
+      return;
+    }
+
+    this.isCapturing = true;
+
     try {
-      this.ctx.drawImage(
-        this.videoElement,
-        0,
-        0,
-        this.canvas.width,
-        this.canvas.height
-      );
-
-      const imageData = this.ctx.getImageData(
-        0,
-        0,
-        this.canvas.width,
-        this.canvas.height
-      );
-      const rgbaArray = new Uint8Array(imageData.data.buffer);
-
-      const webmCluster = this.encoder.encodeFrame(rgbaArray, false);
-
-      if (this.streamConnection && webmCluster.length > 0) {
-        try {
-          this.writeChunk(this.streamConnection.outputStream, webmCluster);
-        } catch (e) {
-          console.error("CastTabSession: Error writing to stream:", e);
-          this.streamConnection = null;
-        }
+      const browsingContext = this.browser.browsingContext;
+      if (!browsingContext) {
+        this.isCapturing = false;
+        return;
       }
+
+      const scale =
+        browsingContext.overrideDPPX || this.window.devicePixelRatio || 1;
+
+      let scrollX = 0;
+      let scrollY = 0;
+
+      try {
+        const actor =
+          this.browser.browsingContext.currentWindowGlobal.getActor("CastTab");
+        const viewportInfo = await actor.getViewportInfo();
+        if (viewportInfo) {
+          scrollX = viewportInfo.scrollX || 0;
+          scrollY = viewportInfo.scrollY || 0;
+        }
+      } catch (e) {
+        lazy.logConsole.error("Failed to get viewport info:", e);
+      }
+
+      const rect = new DOMRect(scrollX, scrollY, this.width, this.height);
+      const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
+        rect,
+        scale,
+        "rgb(255, 255, 255)"
+      );
+
+      this.ctx.drawImage(snapshot, 0, 0, this.canvas.width, this.canvas.height);
+      snapshot.close();
+
+      this.lastCaptureTime = Date.now();
     } catch (e) {
-      console.error("CastTabSession: Error capturing frame:", e);
-      console.error(e.stack);
+      lazy.logConsole.error("Error capturing frame:", e);
+    } finally {
+      this.isCapturing = false;
     }
   }
 
   async stop() {
     if (this.state === "idle") {
+      lazy.logConsole.debug("stop: already idle");
       return;
     }
 
+    lazy.logConsole.debug("Stopping tab session");
     this.setState("stopping");
 
     try {
@@ -221,33 +302,61 @@ export class CastTabSession {
         await this.mediaHandler.stop();
       }
     } catch (e) {
-      console.error("CastTabSession: Error stopping media:", e);
+      lazy.logConsole.error("Error stopping media:", e);
     }
 
     await this.cleanup();
     this.setState("idle");
+    lazy.logConsole.debug("Tab session stopped");
   }
 
   async cleanup() {
     if (this.captureInterval) {
-      clearInterval(this.captureInterval);
+      this.window.clearInterval(this.captureInterval);
       this.captureInterval = null;
     }
 
-    if (this.encoder) {
+    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       try {
-        this.encoder.shutdown();
+        lazy.logConsole.debug("Stopping MediaRecorder");
+        this.mediaRecorder.stop();
       } catch (e) {
-        console.error("CastTabSession: Error shutting down encoder:", e);
+        lazy.logConsole.error("Error stopping MediaRecorder:", e);
       }
-      this.encoder = null;
+    }
+    this.mediaRecorder = null;
+
+    if (this.mediaStream) {
+      try {
+        lazy.logConsole.debug("Stopping media stream tracks");
+        this.mediaStream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        lazy.logConsole.error("Error stopping media stream:", e);
+      }
+      this.mediaStream = null;
+    }
+
+    this.canvas = null;
+    this.ctx = null;
+
+    if (this.tabCloseListener) {
+      try {
+        const gBrowser = this.window.gBrowser;
+        gBrowser.tabContainer.removeEventListener(
+          "TabClose",
+          this.tabCloseListener
+        );
+      } catch (e) {
+        lazy.logConsole.error("Error removing tab close listener:", e);
+      }
+      this.tabCloseListener = null;
     }
 
     if (this.streamConnection && this.server) {
       try {
         this.server.closeConnection(this.streamConnection);
       } catch (e) {
-        console.error("CastTabSession: Error closing stream connection:", e);
+        lazy.logConsole.error("Error closing stream connection:", e);
       }
       this.streamConnection = null;
     }
@@ -257,24 +366,11 @@ export class CastTabSession {
       this.server = null;
     }
 
-    if (this.videoElement) {
-      this.videoElement.pause();
-      this.videoElement.srcObject = null;
-      this.videoElement = null;
-    }
-
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-
     if (this.mediaHandler) {
       this.mediaHandler.reset();
       this.mediaHandler = null;
     }
 
-    this.canvas = null;
-    this.ctx = null;
     this.browser = null;
   }
 
@@ -289,17 +385,18 @@ export class CastTabSession {
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
         if (status?.idleReason === "ERROR") {
-          console.error("CastTabSession: Media playback error");
+          lazy.logConsole.error("Media playback error");
           this.setState("error");
         }
       } else if (message.type === "LOAD_FAILED") {
-        console.error("CastTabSession: LOAD_FAILED:", message);
+        lazy.logConsole.error("LOAD_FAILED:", message);
         this.setState("error");
       } else if (message.type === "LOAD_CANCELLED") {
+        lazy.logConsole.debug("LOAD_CANCELLED");
         this.setState("idle");
       }
     } catch (e) {
-      console.error("CastTabSession: Error handling media message:", e);
+      lazy.logConsole.error("Error handling media message:", e);
     }
   }
 
