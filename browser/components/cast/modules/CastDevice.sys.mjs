@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 import {
   setInterval,
   clearInterval,
@@ -82,7 +86,21 @@ export class CastDevice {
   }
 
   async connect() {
-    return this._attemptConnect();
+    lazy.logConsole.debug(`Connecting to ${this.address}:${this.port}`);
+    return new Promise((resolve, reject) => {
+      this._connectResolve = resolve;
+      this._connectReject = reject;
+
+      try {
+        this._xpcomDevice.connect(this.address, this.port);
+        this._startHeartbeat();
+      } catch (error) {
+        this._connectResolve = null;
+        this._connectReject = null;
+        lazy.logConsole.error(`Connect call failed: ${error}`);
+        reject(error);
+      }
+    });
   }
 
   async _addCastCertOverride() {
@@ -101,6 +119,7 @@ export class CastDevice {
     const issuer = cert.issuerName;
     const subject = cert.subjectName;
 
+    // cast devices use self signed certs!!!
     if (issuer !== subject) {
       lazy.logConsole.warn(`Certificate verification failed: issuer=${issuer}, subject=${subject}`);
       throw new Error("Certificate is not self-signed - not a valid Cast device");
@@ -203,24 +222,6 @@ export class CastDevice {
       } catch (e) {
         lazy.logConsole.error(`Exception creating channel: ${e}`);
         rejectOnce(e);
-      }
-    });
-  }
-
-  async _attemptConnect() {
-    lazy.logConsole.debug(`Connecting to ${this.address}:${this.port}`);
-    return new Promise((resolve, reject) => {
-      this._connectResolve = resolve;
-      this._connectReject = reject;
-
-      try {
-        this._xpcomDevice.connect(this.address, this.port);
-        this._startHeartbeat();
-      } catch (error) {
-        this._connectResolve = null;
-        this._connectReject = null;
-        lazy.logConsole.error(`Connect call failed: ${error}`);
-        reject(error);
       }
     });
   }

@@ -38,6 +38,7 @@ impl CastStreamListener {
         offset: u64,
         count: u32
     ));
+
     fn on_data_available(
         &self,
         _request: &nsIRequest,
@@ -68,34 +69,39 @@ impl CastStreamListener {
     }
 
     fn handle_received_data(&self, data: &[u8]) {
-        if data.len() >= 4 {
-            let msg_length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+        if data.len() < 4 {
+            return;
+        }
 
-            if data.len() >= (4 + msg_length as usize) {
-                let msg_bytes = &data[4..(4 + msg_length as usize)];
-                match CastMessage::decode(msg_bytes) {
-                    Ok(message) => {
-                        if let Some(payload) = &message.payload_utf8 {
-                            // Log incoming message with shortened namespace
-                            let namespace_short = message.namespace
-                                .split('.')
-                                .last()
-                                .unwrap_or(&message.namespace);
+        let msg_length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
 
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
-                                let msg_type = parsed["type"].as_str().unwrap_or("unknown");
-                                println!("CastStreamListener: <- [{}] {}", namespace_short, msg_type);
-                            } else {
-                                println!("CastStreamListener: <- [{}] (non-JSON payload)", namespace_short);
-                            }
+        if data.len() < (4 + msg_length as usize) {
+            return;
+        }
 
-                            self.handle_message(&message.namespace, payload);
-                        }
+        let msg_bytes = &data[4..(4 + msg_length as usize)];
+        
+        match CastMessage::decode(msg_bytes) {
+            Ok(message) => {
+                if let Some(payload) = &message.payload_utf8 {
+                    // Log incoming message with shortened namespace
+                    let namespace_short = message.namespace
+                        .split('.')
+                        .last()
+                        .unwrap_or(&message.namespace);
+
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
+                        let msg_type = parsed["type"].as_str().unwrap_or("unknown");
+                        println!("CastStreamListener: <- [{}] {}", namespace_short, msg_type);
+                    } else {
+                        println!("CastStreamListener: <- [{}] (non-JSON payload)", namespace_short);
                     }
-                    Err(e) => {
-                        println!("CastStreamListener: Failed to decode message: {:?}", e);
-                    }
+
+                    self.handle_message(&message.namespace, payload);
                 }
+            }
+            Err(e) => {
+                println!("CastStreamListener: Failed to decode message: {:?}", e);
             }
         }
     }

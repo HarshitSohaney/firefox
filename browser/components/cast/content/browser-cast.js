@@ -4,7 +4,6 @@
 
 var gCastUI = {
   _castService: null,
-  _discovery: null,
   _initialized: false,
   _connectedDeviceId: null,
 
@@ -13,12 +12,9 @@ var gCastUI = {
 
     try {
       const { gCastService } = ChromeUtils.importESModule(
-        "resource:///modules/cast/CastServiceWrapper.sys.mjs"
+        "resource:///modules/cast/CastService.sys.mjs"
       );
       this._castService = gCastService;
-      this._castService.init();
-      this._discovery = this._castService.getDeviceDiscovery();
-
       this._castService.addStateListener(this.onStateChange.bind(this));
 
       this._initialized = true;
@@ -51,7 +47,7 @@ var gCastUI = {
 
     try {
       console.warn("gCastUI: Adding manual device");
-      const device = await this._discovery.addManualDevice(deviceIP);
+      const device = await this._castService.addManualDevice(deviceIP);
 
       console.warn(
         "gCastUI: Device added successfully, starting cast to device:",
@@ -115,7 +111,6 @@ var gCastUI = {
     try {
       console.warn("gCastUI: Stopping cast");
       await this._castService.stopCasting();
-      await this._castService.stopTabCasting();
       console.warn("gCastUI: Casting stopped");
     } catch (ex) {
       console.error("gCastUI: Failed to stop casting:", ex);

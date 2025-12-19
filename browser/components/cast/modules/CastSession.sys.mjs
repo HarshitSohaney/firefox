@@ -19,7 +19,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   CastMediaHandler: "resource:///modules/cast/CastMediaHandler.sys.mjs",
 });
 
-export class CastTabSession {
+export class CastSession {
   constructor(castDevice, window) {
     this.castDevice = castDevice;
     this.window = window;
