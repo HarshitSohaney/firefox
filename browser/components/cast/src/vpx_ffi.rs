@@ -1,4 +1,8 @@
-use libc::{c_int, c_long, c_uint, c_uchar, c_ulong, c_void, size_t};
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+use libc::{c_int, c_long, c_uchar, c_uint, c_ulong, c_void, size_t};
 use std::mem::ManuallyDrop;
 
 pub const VPX_IMG_FMT_I420: u32 = 0x102;

@@ -6,7 +6,7 @@ interface nsICastVideoEncoder : nsISupports
     void init(in unsigned long width, in unsigned long height,
               in unsigned long bitrate, in unsigned long fps);
 
-    Array<octet> encodeFrame(in Array<octet> rgbaData, in boolean forceKeyframe);
+    Array<octet> encodeFrame(in Array<octet> rgbaData, in boolean forceKeyframe, in long long timestampMs);
 
     Array<octet> getHeader();
 

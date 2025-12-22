@@ -126,7 +126,7 @@ var gCastUI = {
         deviceId,
         browser,
         window,
-        { fps: 15, bitrate: 2500000 }
+        { fps: 24, bitrate: 4000000 }
       );
 
       console.warn("gCastUI: Tab casting started:", result);

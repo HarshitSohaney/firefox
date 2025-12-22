@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use nserror::{nsresult, NS_OK};
 use std::os::raw::c_void;
 use thin_vec::ThinVec;
@@ -79,13 +83,7 @@ impl WebMWriter {
             }
 
             let mut metadata_ptr: *mut c_void = std::ptr::null_mut();
-            let rv = NS_NewVP8Metadata(
-                width,
-                height,
-                width,
-                height,
-                &mut metadata_ptr,
-            );
+            let rv = NS_NewVP8Metadata(width, height, width, height, &mut metadata_ptr);
             if rv != NS_OK {
                 WebMWriter_Release(writer_ptr);
                 return Err(rv);
@@ -114,7 +112,10 @@ impl WebMWriter {
             let mut output_bufs = ThinVec::<ThinVec<u8>>::new();
             let rv = WebMWriter_GetContainerData(self.ptr, &mut output_bufs, GET_HEADER);
             if rv != NS_OK {
-                eprintln!("WebMWriter::get_header: GetContainerData failed with rv={:?}", rv);
+                eprintln!(
+                    "WebMWriter::get_header: GetContainerData failed with rv={:?}",
+                    rv
+                );
                 return Err(rv);
             }
 
@@ -122,7 +123,10 @@ impl WebMWriter {
             for buf in output_bufs.iter() {
                 header.extend_from_slice(buf);
             }
-            eprintln!("WebMWriter::get_header: Generated header of {} bytes", header.len());
+            eprintln!(
+                "WebMWriter::get_header: Generated header of {} bytes",
+                header.len()
+            );
             Ok(header)
         }
     }
@@ -134,7 +138,11 @@ impl WebMWriter {
         is_keyframe: bool,
     ) -> Result<Vec<u8>, nsresult> {
         unsafe {
-            let frame_type = if is_keyframe { VP8_I_FRAME } else { VP8_P_FRAME };
+            let frame_type = if is_keyframe {
+                VP8_I_FRAME
+            } else {
+                VP8_P_FRAME
+            };
             let duration: u64 = 33333;
             let duration_base: u64 = 1_000_000;
 
@@ -149,7 +157,10 @@ impl WebMWriter {
                 &mut frame_ptr,
             );
             if rv != NS_OK {
-                eprintln!("WebMWriter::write_frame: NS_NewEncodedFrame failed with rv={:?}", rv);
+                eprintln!(
+                    "WebMWriter::write_frame: NS_NewEncodedFrame failed with rv={:?}",
+                    rv
+                );
                 return Err(rv);
             }
 
@@ -164,14 +175,20 @@ impl WebMWriter {
             EncodedFrame_Release(frame_ptr);
 
             if rv != NS_OK {
-                eprintln!("WebMWriter::write_frame: WriteEncodedTrack failed with rv={:?}", rv);
+                eprintln!(
+                    "WebMWriter::write_frame: WriteEncodedTrack failed with rv={:?}",
+                    rv
+                );
                 return Err(rv);
             }
 
             let mut output_bufs = ThinVec::<ThinVec<u8>>::new();
             let rv = WebMWriter_GetContainerData(self.ptr, &mut output_bufs, 0);
             if rv != NS_OK {
-                eprintln!("WebMWriter::write_frame: GetContainerData failed with rv={:?}", rv);
+                eprintln!(
+                    "WebMWriter::write_frame: GetContainerData failed with rv={:?}",
+                    rv
+                );
                 return Err(rv);
             }
 
@@ -179,7 +196,11 @@ impl WebMWriter {
             for buf in output_bufs.iter() {
                 cluster.extend_from_slice(buf);
             }
-            eprintln!("WebMWriter::write_frame: Generated cluster of {} bytes (keyframe={})", cluster.len(), is_keyframe);
+            eprintln!(
+                "WebMWriter::write_frame: Generated cluster of {} bytes (keyframe={})",
+                cluster.len(),
+                is_keyframe
+            );
             Ok(cluster)
         }
     }

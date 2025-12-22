@@ -1,5 +1,7 @@
-use crate::handlers::ConnectionHandler;
+use crate::constants::{namespaces, CAST_PORT, RECEIVER_ID, SENDER_ID};
+use crate::handlers::{ConnectionHandler, ReceiverHandler};
 use crate::message::CastMessage;
+use crate::state::DeviceState;
 use nserror::{nsresult, NS_ERROR_FAILURE, NS_ERROR_NOT_AVAILABLE, NS_OK};
 use nsstring::{nsACString, nsCString};
 use serde_json;
@@ -13,7 +15,7 @@ use xpcom::interfaces::{
 use xpcom::{xpcom_method, RefPtr};
 
 struct CastDeviceInner {
-    state: nsCString,
+    state: DeviceState,
     callback: Option<RefPtr<nsICastDeviceCallback>>,
     transport: Option<RefPtr<nsISocketTransport>>,
     output_stream: Option<RefPtr<nsIOutputStream>>,
@@ -24,12 +26,13 @@ struct CastDeviceInner {
     app_transport_id: Option<String>,
     address: nsCString,
     port: i32,
+    receiver_handler: ReceiverHandler,
 }
 
 impl Default for CastDeviceInner {
     fn default() -> Self {
         Self {
-            state: nsCString::from("disconnected"),
+            state: DeviceState::Disconnected,
             callback: None,
             transport: None,
             output_stream: None,
@@ -39,8 +42,41 @@ impl Default for CastDeviceInner {
             app_session_id: None,
             app_transport_id: None,
             address: nsCString::new(),
-            port: 8009,
+            port: CAST_PORT,
+            receiver_handler: ReceiverHandler::new(),
         }
+    }
+}
+
+impl CastDeviceInner {
+    fn cleanup(&mut self) {
+        if let Some(pump) = self.input_pump.take() {
+            unsafe {
+                pump.Cancel(NS_ERROR_FAILURE);
+            }
+        }
+
+        if let Some(stream) = self.input_stream.take() {
+            unsafe {
+                stream.Close();
+            }
+        }
+
+        if let Some(stream) = self.output_stream.take() {
+            unsafe {
+                stream.Close();
+            }
+        }
+
+        if let Some(transport) = self.transport.take() {
+            unsafe {
+                transport.Close(NS_OK);
+            }
+        }
+
+        self.receive_buffer.clear();
+        self.app_session_id = None;
+        self.app_transport_id = None;
     }
 }
 
@@ -72,12 +108,16 @@ impl CastDevice {
         self.inner.borrow_mut().app_transport_id = transport_id;
     }
 
-    fn notify_state_change(&self, state: &str) {
+    pub fn create_launch_message(&self, app_id: Option<&str>) -> String {
+        self.inner.borrow().receiver_handler.create_launch(app_id)
+    }
+
+    fn notify_state_change(&self, state: DeviceState) {
         let mut inner = self.inner.borrow_mut();
-        inner.state = nsCString::from(state);
+        inner.state = state;
         if let Some(ref callback) = inner.callback {
             unsafe {
-                callback.OnStateChanged(&nsCString::from(state) as &nsACString);
+                callback.OnStateChanged(&state.to_nscstring() as &nsACString);
             }
         }
     }
@@ -87,12 +127,20 @@ impl CastDevice {
         println!("CastDevice: Connecting to {}:{}", address, port);
 
         {
+            let inner = self.inner.borrow();
+            if inner.transport.is_some() {
+                println!("CastDevice: Already connected, skipping");
+                return Ok(());
+            }
+        }
+
+        {
             let mut inner = self.inner.borrow_mut();
             inner.address = nsCString::from(address);
             inner.port = port;
         }
 
-        self.notify_state_change("connecting");
+        self.notify_state_change(DeviceState::Connecting);
 
         let sts_service = xpcom::components::SocketTransport::service::<nsISocketTransportService>()
             .map_err(|e| {
@@ -117,7 +165,7 @@ impl CastDevice {
 
         if rv.failed() || transport_ptr.is_null() {
             println!("CastDevice: Failed to create TLS transport");
-            self.notify_state_change("error");
+            self.notify_state_change(DeviceState::Error);
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -131,7 +179,7 @@ impl CastDevice {
 
         if rv.failed() || output_stream_ptr.is_null() {
             println!("CastDevice: Failed to open output stream");
-            self.notify_state_change("error");
+            self.notify_state_change(DeviceState::Error);
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -145,7 +193,7 @@ impl CastDevice {
 
         if rv.failed() || input_stream_ptr.is_null() {
             println!("CastDevice: Failed to open input stream");
-            self.notify_state_change("error");
+            self.notify_state_change(DeviceState::Error);
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -163,7 +211,7 @@ impl CastDevice {
 
         if rv.failed() {
             println!("CastDevice: Failed to initialize input stream pump");
-            self.notify_state_change("error");
+            self.notify_state_change(DeviceState::Error);
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -178,7 +226,7 @@ impl CastDevice {
 
         if rv.failed() {
             println!("CastDevice: Failed to start async reading");
-            self.notify_state_change("error");
+            self.notify_state_change(DeviceState::Error);
             return Err(NS_ERROR_FAILURE);
         }
 
@@ -187,14 +235,14 @@ impl CastDevice {
         let connect_payload = ConnectionHandler::create_connect_message();
         self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
 
-        let get_status = serde_json::json!({
-            "type": "GET_STATUS",
-            "requestId": 1
-        }).to_string();
-        self.send_message_internal("urn:x-cast:com.google.cast.receiver", &get_status)?;
+        let get_status = {
+            let inner = self.inner.borrow();
+            inner.receiver_handler.create_get_status()
+        };
+        self.send_message_internal(ReceiverHandler::NAMESPACE, &get_status)?;
 
         println!("CastDevice: Connected successfully");
-        self.notify_state_change("connected");
+        self.notify_state_change(DeviceState::Connected);
 
         Ok(())
     }
@@ -204,16 +252,16 @@ impl CastDevice {
         namespace: &str,
         payload: &str,
     ) -> Result<(), nsresult> {
-        let destination = if namespace == "urn:x-cast:com.google.cast.media" {
+        let destination = if namespace == namespaces::MEDIA {
             if let Some(transport_id) = self.get_transport_id() {
                 println!("CastDevice: Routing media message to app transport: {}", transport_id);
                 transport_id
             } else {
-                println!("CastDevice: WARNING - No transport ID, sending media message to receiver-0");
-                "receiver-0".to_string()
+                println!("CastDevice: WARNING - No transport ID, sending media message to {}", RECEIVER_ID);
+                RECEIVER_ID.to_string()
             }
         } else {
-            "receiver-0".to_string()
+            RECEIVER_ID.to_string()
         };
 
         self.send_message_to(&destination, namespace, payload)
@@ -228,7 +276,7 @@ impl CastDevice {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(payload) {
             let msg_type = parsed["type"].as_str().unwrap_or("unknown");
             let namespace_short = namespace.split('.').last().unwrap_or(namespace);
-            let dest_suffix = if destination_id == "receiver-0" {
+            let dest_suffix = if destination_id == RECEIVER_ID {
                 String::from("")
             } else {
                 format!(" to {}", &destination_id[..8.min(destination_id.len())])
@@ -240,7 +288,7 @@ impl CastDevice {
         let stream = inner.output_stream.as_ref().ok_or(NS_ERROR_NOT_AVAILABLE)?;
 
         let cast_message = CastMessage::new(
-            "sender-0".to_string(),
+            SENDER_ID.to_string(),
             destination_id.to_string(),
             namespace.to_string(),
             payload.to_string(),
@@ -274,37 +322,10 @@ impl CastDevice {
         println!("CastDevice::disconnect called");
 
         let mut inner = self.inner.borrow_mut();
-
-        if let Some(pump) = inner.input_pump.take() {
-            unsafe {
-                pump.Cancel(NS_ERROR_FAILURE);
-            }
-        }
-
-        if let Some(stream) = inner.input_stream.take() {
-            unsafe {
-                stream.Close();
-            }
-        }
-
-        if let Some(stream) = inner.output_stream.take() {
-            unsafe {
-                stream.Close();
-            }
-        }
-
-        if let Some(transport) = inner.transport.take() {
-            unsafe {
-                transport.Close(NS_OK);
-            }
-        }
-
-        inner.receive_buffer.clear();
-        inner.app_session_id = None;
-        inner.app_transport_id = None;
-
+        inner.cleanup();
         drop(inner);
-        self.notify_state_change("disconnected");
+
+        self.notify_state_change(DeviceState::Disconnected);
 
         println!("CastDevice: Disconnected successfully");
         Ok(())
@@ -333,12 +354,19 @@ impl CastDevice {
 
     xpcom_method!(get_state => GetState() -> nsACString);
     fn get_state(&self) -> Result<nsCString, nsresult> {
-        Ok(self.inner.borrow().state.clone())
+        Ok(self.inner.borrow().state.to_nscstring())
     }
 
     xpcom_method!(get_app_transport_id => GetAppTransportId() -> nsACString);
     fn get_app_transport_id(&self) -> Result<nsCString, nsresult> {
         Ok(self.inner.borrow().app_transport_id.as_ref()
+            .map(|s| nsCString::from(s.as_str()))
+            .unwrap_or_else(nsCString::new))
+    }
+
+    xpcom_method!(get_app_session_id_xpcom => GetAppSessionId() -> nsACString);
+    fn get_app_session_id_xpcom(&self) -> Result<nsCString, nsresult> {
+        Ok(self.get_app_session_id()
             .map(|s| nsCString::from(s.as_str()))
             .unwrap_or_else(nsCString::new))
     }

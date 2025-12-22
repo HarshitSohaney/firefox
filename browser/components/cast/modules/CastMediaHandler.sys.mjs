@@ -1,3 +1,9 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import { CAST_NAMESPACES } from "resource:///modules/cast/CastConstants.mjs";
+
 const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
@@ -10,7 +16,7 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 });
 
 export class CastMediaHandler {
-  static NAMESPACE = "urn:x-cast:com.google.cast.media";
+  static NAMESPACE = CAST_NAMESPACES.MEDIA;
 
   constructor(castDevice) {
     this.castDevice = castDevice;

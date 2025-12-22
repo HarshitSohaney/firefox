@@ -24,6 +24,7 @@ EXTRA_JS_MODULES.cast = [
     "modules/CastDevice.sys.mjs",
     "modules/CastError.mjs",
     "modules/CastMediaHandler.sys.mjs",
+    "modules/CastMediaSession.sys.mjs",
     "modules/CastSession.sys.mjs",
     "modules/SimpleHTTPServer.sys.mjs",
 ]

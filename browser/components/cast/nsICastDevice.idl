@@ -76,4 +76,10 @@ interface nsICastDevice : nsISupports
    * Returns empty string if no app is running.
    */
   AUTF8String getAppTransportId();
+
+  /**
+   * Get the app session ID for stopping the receiver app.
+   * Returns empty string if no app is running.
+   */
+  AUTF8String getAppSessionId();
 };

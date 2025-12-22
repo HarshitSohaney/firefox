@@ -130,11 +130,12 @@ impl CastVideoEncoder {
         Ok(())
     }
 
-    xpcom_method!(encode_frame => EncodeFrame(rgba_data: *const ThinVec<u8>, force_keyframe: bool) -> ThinVec<u8>);
+    xpcom_method!(encode_frame => EncodeFrame(rgba_data: *const ThinVec<u8>, force_keyframe: bool, timestamp_ms: i64) -> ThinVec<u8>);
     fn encode_frame(
         &self,
         rgba_data: &ThinVec<u8>,
         force_keyframe: bool,
+        timestamp_ms: i64,
     ) -> Result<ThinVec<u8>, nsresult> {
         let mut state = self.state.borrow_mut();
 
@@ -149,7 +150,10 @@ impl CastVideoEncoder {
             return Err(nserror::NS_ERROR_INVALID_ARG);
         }
 
-        let timestamp_ms = (frame_count * 1000) / (fps as u64);
+        if frame_count % 60 == 0 {
+            eprintln!("CastVideoEncoder: Frame {}: timestamp_ms={}", frame_count, timestamp_ms);
+        }
+
         let should_force_kf = force_keyframe || frame_count % (fps as u64 * 2) == 0;
         let flags = if should_force_kf {
             VPX_EFLAG_FORCE_KF
@@ -254,6 +258,7 @@ impl CastVideoEncoder {
         let state = self.state.borrow();
         let width = state.width as usize;
         let height = state.height as usize;
+        let fps = state.fps;
         drop(state);
 
         let frame_size = width * height * 4;
@@ -272,7 +277,8 @@ impl CastVideoEncoder {
         let rgba_thin = ThinVec::from(rgba);
         for i in 0..frames {
             eprintln!("DumpTestWebM: Encoding frame {}/{}", i + 1, frames);
-            let cluster = self.encode_frame(&rgba_thin, i == 0)?;
+            let timestamp_ms = ((i as u64) * 1000) / (fps as u64);
+            let cluster = self.encode_frame(&rgba_thin, i == 0, timestamp_ms as i64)?;
             eprintln!("DumpTestWebM: Frame {} generated {} bytes", i + 1, cluster.len());
             out.extend_from_slice(&cluster);
         }

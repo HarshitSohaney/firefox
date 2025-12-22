@@ -27,7 +27,8 @@ nsresult WebMWriter_SetMetadata(void* aWriter, const void** aMetadata,
   nsTArray<RefPtr<TrackMetadataBase>> metadataArray;
 
   for (size_t i = 0; i < aMetadataCount; i++) {
-    auto* metadata = static_cast<TrackMetadataBase*>(const_cast<void*>(aMetadata[i]));
+    auto* metadata =
+        static_cast<TrackMetadataBase*>(const_cast<void*>(aMetadata[i]));
     metadataArray.AppendElement(metadata);
   }
 

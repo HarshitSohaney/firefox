@@ -8,6 +8,12 @@ import {
   clearTimeout,
   setTimeout,
 } from "resource://gre/modules/Timer.sys.mjs";
+import {
+  CAST_NAMESPACES,
+  CAST_APP_IDS,
+  DEFAULT_CAST_PORT,
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+} from "resource:///modules/cast/CastConstants.mjs";
 
 const lazy = {};
 
@@ -21,7 +27,7 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 });
 
 export class CastDevice {
-  constructor(id, address, port = 8009) {
+  constructor(id, address, port = DEFAULT_CAST_PORT) {
     this.id = id;
     this.address = address;
     this.port = port;
@@ -86,6 +92,11 @@ export class CastDevice {
   }
 
   async connect() {
+    if (this.state === "connected") {
+      lazy.logConsole.debug(`Already connected to ${this.address}:${this.port}, skipping`);
+      return Promise.resolve();
+    }
+
     lazy.logConsole.debug(`Connecting to ${this.address}:${this.port}`);
     return new Promise((resolve, reject) => {
       this._connectResolve = resolve;
@@ -234,17 +245,20 @@ export class CastDevice {
     this._heartbeatTimer = setInterval(() => {
       try {
         this._xpcomDevice.sendMessage(
-          "urn:x-cast:com.google.cast.tp.heartbeat",
+          CAST_NAMESPACES.HEARTBEAT,
           JSON.stringify({ type: "PING" })
         );
       } catch (error) {
         console.error("Cast heartbeat failed:", error);
       }
-    }, 5000);
+    }, DEFAULT_HEARTBEAT_INTERVAL_MS);
   }
 
   disconnect() {
     lazy.logConsole.debug(`Disconnecting from ${this.address}:${this.port}`);
+
+    this.stopApp();
+
     if (this._heartbeatTimer) {
       clearInterval(this._heartbeatTimer);
       this._heartbeatTimer = null;
@@ -276,7 +290,7 @@ export class CastDevice {
     this._xpcomDevice.sendMessageTo(destinationId, namespace, payload);
   }
 
-  async launchApp(appId = "CC1AD845") {
+  async launchApp(appId = CAST_APP_IDS.DEFAULT_MEDIA_RECEIVER) {
     lazy.logConsole.debug(`Launching app: ${appId}`);
     const payload = JSON.stringify({
       type: "LAUNCH",
@@ -284,7 +298,7 @@ export class CastDevice {
       appId,
     });
 
-    this.sendMessage("urn:x-cast:com.google.cast.receiver", payload);
+    this.sendMessage(CAST_NAMESPACES.RECEIVER, payload);
     const transportId = await this._waitForTransportId(5000);
     if (transportId) {
       lazy.logConsole.debug(`App launched successfully, transportId: ${transportId}`);
@@ -292,6 +306,23 @@ export class CastDevice {
       lazy.logConsole.warn(`App launch failed: no transportId received`);
     }
     return { success: true, transportId };
+  }
+
+  stopApp() {
+    const sessionId = this._xpcomDevice.getAppSessionId();
+    if (!sessionId) {
+      lazy.logConsole.debug("No app session to stop");
+      return;
+    }
+
+    lazy.logConsole.debug(`Stopping app session: ${sessionId}`);
+    const payload = JSON.stringify({
+      type: "STOP",
+      requestId: Date.now(),
+      sessionId,
+    });
+
+    this.sendMessage(CAST_NAMESPACES.RECEIVER, payload);
   }
 
   async _waitForTransportId(timeoutMs) {

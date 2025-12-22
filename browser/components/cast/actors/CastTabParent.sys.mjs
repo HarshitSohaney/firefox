@@ -7,4 +7,28 @@ export class CastTabParent extends JSWindowActorParent {
       return null;
     }
   }
+
+  receiveMessage(message) {
+    switch (message.name) {
+      case "CastTab:VideoFullscreen":
+        this.handleVideoFullscreen(message.data);
+        break;
+    }
+  }
+
+  handleVideoFullscreen(data) {
+    const browser = this.browsingContext?.top.embedderElement;
+    if (!browser) {
+      return;
+    }
+
+    const window = browser.ownerGlobal;
+    if (window?.gCastUI) {
+      if (data.entered) {
+        window.gCastUI.onVideoFullscreen(data.videoUrl);
+      } else {
+        window.gCastUI.onVideoFullscreenExit();
+      }
+    }
+  }
 }

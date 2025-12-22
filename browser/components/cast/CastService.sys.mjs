@@ -50,6 +50,7 @@ export class CastService extends EventTarget {
     lazy.logConsole.debug("Initializing CastService");
     this.#instance = new CastService();
     this.#instance.#initialize();
+    this.#instance.#registerObserver();
     return this.#instance;
   }
 
@@ -71,6 +72,19 @@ export class CastService extends EventTarget {
   constructor() {
     super();
     lazy.logConsole.debug("CastService instantiated");
+  }
+
+  #registerObserver() {
+    const observer = {
+      QueryInterface: ChromeUtils.generateQI(["nsIObserver"]),
+      observe: (subject, topic, data) => {
+        if (topic === "quit-application") {
+          lazy.logConsole.debug("Firefox quitting, cleaning up Cast sessions and devices");
+          this.cleanupOnQuit();
+        }
+      }
+    };
+    Services.obs.addObserver(observer, "quit-application", false);
   }
 
   #initialize() {
@@ -123,11 +137,8 @@ export class CastService extends EventTarget {
 
     const deviceId = `manual-${ipAddress}`;
     if (this.#devices.has(deviceId)) {
-      lazy.logConsole.warn(`Device ${deviceId} already exists`);
-      throw new CastError(
-        "Device already added",
-        CAST_ERRORS.ALREADY_CONNECTED
-      );
+      lazy.logConsole.debug(`Device ${deviceId} already exists, returning existing device`);
+      return this.#devices.get(deviceId);
     }
 
     const device = new lazy.CastDevice(deviceId, ipAddress, port);
@@ -273,6 +284,17 @@ export class CastService extends EventTarget {
 
   removeStateListener(listener) {
     this.#stateListeners.delete(listener);
+  }
+
+  async cleanupOnQuit() {
+    await this.stopCasting();
+    for (const device of this.#devices.values()) {
+      try {
+        device.disconnect();
+      } catch (error) {
+        lazy.logConsole.error(`Error disconnecting device ${device.id}:`, error);
+      }
+    }
   }
 
   #notifyStateListeners(state, device) {

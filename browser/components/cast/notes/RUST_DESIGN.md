@@ -95,14 +95,19 @@ interface nsICastDeviceCallback : nsISupports {
 ```
 browser/components/cast/src/
 ├── lib.rs                    # XPCOM exports
+├── constants.rs              # Centralized constants (namespaces, IDs, ports)
+├── state.rs                  # DeviceState enum
+├── messages.rs               # Typed message structs with serde
 ├── cast_device.rs            # Main CastDevice component
-├── connection.rs             # Socket transport management
-├── protocol/
+├── stream_listener.rs        # Async message receiver
+├── message.rs                # Protobuf encoding/decoding
+├── video_encoder.rs          # VP8 encoding
+├── handlers/
 │   ├── mod.rs
-│   ├── state_machine.rs      # Connection state
-│   ├── heartbeat.rs          # PING/PONG
+│   ├── connection.rs         # CONNECT/CLOSE messages
+│   ├── heartbeat.rs          # PING/PONG handling
 │   └── receiver.rs           # GET_STATUS, LAUNCH
-└── message.rs                # Protobuf (already exists)
+└── vpx_ffi.rs                # libvpx FFI bindings
 ```
 
 ## Testing Strategy
@@ -117,13 +122,23 @@ Each phase has specific tests:
 
 ## Current Status
 
-**Working JavaScript Implementation**:
-- ✅ Connection to Google TV Streamer
-- ✅ Protobuf encoding/decoding
-- ✅ Heartbeat (PING/PONG)
-- ✅ App launching
+**Rust XPCOM Implementation**:
+- ✅ XPCOM component registration (Phase 1 complete)
+- ✅ TLS connection via nsISocketTransport (Phase 2 complete)
+- ✅ Protobuf encoding/decoding (Phase 3 complete)
+- ✅ Connection state machine (Phase 4 complete)
+- ✅ JavaScript integration (Phase 5 complete)
+- ✅ App launching and media control (Phase 6 complete)
+- ✅ **Code quality refactoring (December 2024)**
+  - Type-safe state enum
+  - Typed message structs with serde
+  - Centralized constants
+  - Handler delegation pattern
 
-**Next**: Create XPCOM interface and basic Rust component
+**Recent Improvements**: See [CODE_QUALITY_REFACTOR.md](./CODE_QUALITY_REFACTOR.md) for details on:
+- Code organization improvements
+- Type safety enhancements
+- Memory management patterns
 
 ## References
 

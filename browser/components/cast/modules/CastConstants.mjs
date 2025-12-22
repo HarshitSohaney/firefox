@@ -17,6 +17,7 @@ export const CAST_ERRORS = Object.freeze({
   ALREADY_CONNECTED: 11,
   NOT_CONNECTED: 12,
   INVALID_STATE: 13,
+  INVALID_URL: 14,
   UNKNOWN: 99,
 });
 

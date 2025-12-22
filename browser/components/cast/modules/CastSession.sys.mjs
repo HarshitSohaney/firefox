@@ -39,6 +39,8 @@ export class CastSession {
     this.height = 0;
     this.isCapturing = false;
     this.lastCaptureTime = 0;
+    this._receivedMediaStatus = false;
+    this._pendingStreamConnection = null;
   }
 
   async start(browser, options = {}) {
@@ -83,39 +85,26 @@ export class CastSession {
         willReadFrequently: false,
       });
 
-      const fps = options.fps || 15;
-      const videoBitsPerSecond = options.bitrate || 2500000;
+      this.fps = options.fps || 24;
+      const videoBitsPerSecond = options.bitrate || 4000000;
 
       lazy.logConsole.debug(
-        `Canvas ${canvasWidth}x${canvasHeight} @ ${fps}fps, ${Math.floor(videoBitsPerSecond / 1000)}kbps`
+        `Canvas ${canvasWidth}x${canvasHeight} @ ${this.fps}fps, ${Math.floor(videoBitsPerSecond / 1000)}kbps`
       );
 
-      this.mediaStream = this.canvas.captureStream(fps);
+      this._encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
+        Ci.nsICastVideoEncoder
+      );
+      this._encoder.init(canvasWidth, canvasHeight, videoBitsPerSecond, this.fps);
 
-      this.mediaRecorder = new this.window.MediaRecorder(this.mediaStream, {
-        mimeType: "video/webm;codecs=vp8",
-        videoBitsPerSecond,
-      });
+      this._webmHeader = this._encoder.getHeader();
+      this._frameCount = 0;
+      this._encodingStarted = false;
+      this._streamStartTime = null;
 
-      this.mediaRecorder.ondataavailable = event => {
-        if (event.data && event.data.size > 0 && this.streamConnection) {
-          event.data.arrayBuffer().then(buffer => {
-            try {
-              const data = new Uint8Array(buffer);
-              this.writeChunk(this.streamConnection.outputStream, data);
-            } catch (e) {
-              lazy.logConsole.error("Error writing chunk:", e);
-            }
-          });
-        }
-      };
-
-      this.mediaRecorder.onerror = event => {
-        lazy.logConsole.error("MediaRecorder error:", event);
-        this.setState("error");
-      };
-
-      this.mediaRecorder.start(100);
+      lazy.logConsole.debug(
+        `Rust encoder initialized, WebM header: ${this._webmHeader.length} bytes`
+      );
 
       this.server = new SimpleHTTPServer();
       this.server.registerPathHandler("/stream.webm", connection => {
@@ -156,24 +145,9 @@ export class CastSession {
       };
       await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
 
-      const intervalMs = 1000 / fps;
-      this.captureInterval = this.window.setInterval(() => {
-        const now = Date.now();
-        if (now - this.lastCaptureTime < intervalMs * 0.9) {
-          return;
-        }
-
-        if (this.window.requestIdleCallback) {
-          this.window.requestIdleCallback(
-            () => this.captureFrame(),
-            { timeout: intervalMs / 2 }
-          );
-        } else {
-          this.captureFrame();
-        }
-      }, intervalMs);
-
-      lazy.logConsole.debug("Started optimized capture loop");
+      lazy.logConsole.debug(
+        "Media LOAD sent to Cast device. Waiting for MEDIA_STATUS response..."
+      );
 
       this.setState("streaming");
 
@@ -191,12 +165,15 @@ export class CastSession {
 
   handleStreamRequest(connection) {
     try {
-      lazy.logConsole.debug("Stream connection established");
+      const connectTime = Date.now();
+      lazy.logConsole.debug(`Cast device connected to stream at ${connectTime}`);
 
       const headers =
         "HTTP/1.1 200 OK\r\n" +
         "Content-Type: video/webm\r\n" +
-        "Cache-Control: no-cache, no-store, must-revalidate\r\n" +
+        "Cache-Control: no-cache, no-store, must-revalidate, max-age=0\r\n" +
+        "Pragma: no-cache\r\n" +
+        "Expires: 0\r\n" +
         "Connection: keep-alive\r\n" +
         "Transfer-Encoding: chunked\r\n" +
         "Access-Control-Allow-Origin: *\r\n" +
@@ -207,8 +184,21 @@ export class CastSession {
 
       connection.outputStream.write(headers, headers.length);
 
+      if (this._webmHeader && this._webmHeader.length > 0) {
+        lazy.logConsole.debug(`Sending WebM header: ${this._webmHeader.length} bytes`);
+        this.writeChunk(connection.outputStream, this._webmHeader);
+      }
+
       this.streamConnection = connection;
-      lazy.logConsole.debug("Ready to stream MediaRecorder chunks");
+      this._frameCount = 0;
+
+      if (this._receivedMediaStatus) {
+        lazy.logConsole.debug("Media status already received, starting encoding now");
+        this.startCaptureLoop();
+      } else {
+        lazy.logConsole.debug("Waiting for first MEDIA_STATUS before starting encoding...");
+        this._pendingStreamConnection = true;
+      }
     } catch (e) {
       lazy.logConsole.error("Error in handleStreamRequest:", e);
       if (this.server) {
@@ -234,8 +224,42 @@ export class CastSession {
     outputStream.flush();
   }
 
+  startCaptureLoop() {
+    if (this._encodingStarted) {
+      lazy.logConsole.warn("startCaptureLoop called but encoding already started!");
+      return;
+    }
+
+    this._encodingStarted = true;
+    this._streamStartTime = Date.now();
+    this._nextFrameTime = this._streamStartTime;
+    lazy.logConsole.debug(`Both stream connection and MEDIA_STATUS ready! Starting capture at: ${this._streamStartTime}`);
+
+    const intervalMs = 1000 / this.fps;
+    lazy.logConsole.debug(`Started capture loop at ${this.fps} FPS (interval: ${intervalMs}ms)`);
+
+    const captureLoop = async () => {
+      if (!this._encodingStarted || !this.canvas) {
+        return;
+      }
+
+      const now = Date.now();
+
+      if (now >= this._nextFrameTime) {
+        await this.captureFrame();
+        this._nextFrameTime += intervalMs;
+      }
+
+      if (this._encodingStarted) {
+        this.captureInterval = this.window.requestAnimationFrame(captureLoop);
+      }
+    };
+
+    this.captureInterval = this.window.requestAnimationFrame(captureLoop);
+  }
+
   async captureFrame() {
-    if (!this.canvas || !this.ctx || !this.browser) {
+    if (!this.browser || !this._encoder || !this.canvas) {
       return;
     }
 
@@ -277,9 +301,39 @@ export class CastSession {
         "rgb(255, 255, 255)"
       );
 
+      if (!this.ctx) {
+        this.ctx = this.canvas.getContext("2d", {
+          alpha: false,
+          willReadFrequently: true,
+        });
+      }
+
       this.ctx.drawImage(snapshot, 0, 0, this.canvas.width, this.canvas.height);
       snapshot.close();
 
+      const imageData = this.ctx.getImageData(
+        0,
+        0,
+        this.canvas.width,
+        this.canvas.height
+      );
+      const rgbaData = new Uint8Array(imageData.data.buffer);
+
+      const now = Date.now();
+      const timestampMs = now - this._streamStartTime;
+      const forceKeyframe = this._frameCount % this.fps === 0;
+
+      if (this._frameCount % 60 === 0) {
+        lazy.logConsole.debug(`Frame ${this._frameCount}: timestamp=${timestampMs}ms, keyframe=${forceKeyframe}`);
+      }
+
+      const webmCluster = this._encoder.encodeFrame(rgbaData, forceKeyframe, timestampMs);
+
+      if (this.streamConnection && webmCluster && webmCluster.length > 0) {
+        this.writeChunk(this.streamConnection.outputStream, webmCluster);
+      }
+
+      this._frameCount++;
       this.lastCaptureTime = Date.now();
     } catch (e) {
       lazy.logConsole.error("Error capturing frame:", e);
@@ -312,32 +366,28 @@ export class CastSession {
 
   async cleanup() {
     if (this.captureInterval) {
-      this.window.clearInterval(this.captureInterval);
+      this.window.cancelAnimationFrame(this.captureInterval);
       this.captureInterval = null;
     }
 
-    if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+    if (this._encoder) {
       try {
-        lazy.logConsole.debug("Stopping MediaRecorder");
-        this.mediaRecorder.stop();
+        lazy.logConsole.debug("Shutting down encoder");
+        this._encoder.shutdown();
       } catch (e) {
-        lazy.logConsole.error("Error stopping MediaRecorder:", e);
+        lazy.logConsole.error("Error shutting down encoder:", e);
       }
-    }
-    this.mediaRecorder = null;
-
-    if (this.mediaStream) {
-      try {
-        lazy.logConsole.debug("Stopping media stream tracks");
-        this.mediaStream.getTracks().forEach(track => track.stop());
-      } catch (e) {
-        lazy.logConsole.error("Error stopping media stream:", e);
-      }
-      this.mediaStream = null;
+      this._encoder = null;
     }
 
     this.canvas = null;
     this.ctx = null;
+    this._webmHeader = null;
+    this._frameCount = 0;
+    this._encodingStarted = false;
+    this._streamStartTime = null;
+    this._receivedMediaStatus = false;
+    this._pendingStreamConnection = null;
 
     if (this.tabCloseListener) {
       try {
@@ -384,6 +434,18 @@ export class CastSession {
 
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
+
+        if (!this._receivedMediaStatus) {
+          this._receivedMediaStatus = true;
+          lazy.logConsole.debug("Received first MEDIA_STATUS");
+
+          if (this._pendingStreamConnection && this.streamConnection) {
+            lazy.logConsole.debug("Stream connection is ready, starting encoding now");
+            this._pendingStreamConnection = false;
+            this.startCaptureLoop();
+          }
+        }
+
         if (status?.idleReason === "ERROR") {
           lazy.logConsole.error("Media playback error");
           this.setState("error");

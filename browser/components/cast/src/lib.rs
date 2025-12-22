@@ -1,6 +1,13 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 pub mod cast_device;
+pub mod constants;
 pub mod handlers;
 pub mod message;
+pub mod messages;
+pub mod state;
 pub mod stream_listener;
 pub mod video_encoder;
 pub mod vpx_ffi;
@@ -8,6 +15,7 @@ pub mod webm_writer_ffi;
 
 pub use handlers::{ConnectionHandler, HeartbeatHandler, ReceiverHandler};
 pub use message::CastMessage;
+pub use state::DeviceState;
 
 #[no_mangle]
 pub unsafe extern "C" fn NS_NewCastDevice(
