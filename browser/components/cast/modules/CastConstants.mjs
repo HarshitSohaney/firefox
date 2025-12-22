@@ -39,6 +39,7 @@ export const CAST_STATES = Object.freeze({
   DISCONNECTING: "disconnecting",
 });
 
+// Default media receiver id
 export const CAST_APP_IDS = Object.freeze({
   DEFAULT_MEDIA_RECEIVER: "CC1AD845",
 });

@@ -138,17 +138,6 @@ impl CastDevice {
         let output_stream: RefPtr<nsIOutputStream> = unsafe { RefPtr::from_raw(output_stream_ptr as *mut _).unwrap() };
         self.inner.borrow_mut().output_stream = Some(output_stream);
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        let connect_payload = ConnectionHandler::create_connect_message();
-        self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
-
-        let get_status = serde_json::json!({
-            "type": "GET_STATUS",
-            "requestId": 1
-        }).to_string();
-        self.send_message_internal("urn:x-cast:com.google.cast.receiver", &get_status)?;
-
         let mut input_stream_ptr: *const nsIInputStream = std::ptr::null();
         let rv = unsafe {
             transport.OpenInputStream(0, 0, 0, &mut input_stream_ptr as *mut _)
@@ -192,6 +181,17 @@ impl CastDevice {
             self.notify_state_change("error");
             return Err(NS_ERROR_FAILURE);
         }
+
+        println!("CastDevice: Async listener started, sending initial messages");
+
+        let connect_payload = ConnectionHandler::create_connect_message();
+        self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
+
+        let get_status = serde_json::json!({
+            "type": "GET_STATUS",
+            "requestId": 1
+        }).to_string();
+        self.send_message_internal("urn:x-cast:com.google.cast.receiver", &get_status)?;
 
         println!("CastDevice: Connected successfully");
         self.notify_state_change("connected");
