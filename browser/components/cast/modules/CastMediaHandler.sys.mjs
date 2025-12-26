@@ -15,6 +15,9 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   });
 });
 
+/**
+ *
+ */
 export class CastMediaHandler {
   static NAMESPACE = CAST_NAMESPACES.MEDIA;
 
@@ -45,10 +48,7 @@ export class CastMediaHandler {
 
     try {
       lazy.logConsole.debug(`Sending media command: ${command}`);
-      await this.castDevice.sendMessage(
-        CastMediaHandler.NAMESPACE,
-        payload
-      );
+      await this.castDevice.sendMessage(CastMediaHandler.NAMESPACE, payload);
       return requestId;
     } catch (e) {
       lazy.logConsole.error(`Error sending ${command}:`, e);
@@ -101,7 +101,7 @@ export class CastMediaHandler {
       lazy.logConsole.debug("No active media session to stop");
       return;
     }
-    return await this.sendMediaCommand("STOP");
+    await this.sendMediaCommand("STOP");
   }
 
   async seek(currentTime) {
@@ -119,7 +119,7 @@ export class CastMediaHandler {
     try {
       const message = JSON.parse(payload);
 
-      if (message.status && message.status.length > 0) {
+      if (message.status && message.status.length) {
         const status = message.status[0];
         lazy.logConsole.debug(`Media status: ${status.playerState}`);
         if (status.mediaSessionId) {

@@ -484,6 +484,26 @@ export const CustomizableWidgets = [
       lazy.LoginHelper.openPasswordManager(window, { entryPoint: "Toolbar" });
     },
   },
+  {
+    id: "cast-button",
+    l10nId: "toolbar-button-cast",
+    type: "view",
+    viewId: "castPanel-mainView",
+    onViewShowing(aEvent) {
+      let doc = aEvent.target.ownerDocument;
+      let win = doc.defaultView;
+      if (win.CastPanel) {
+        win.CastPanel.onPanelShowing(aEvent);
+      }
+    },
+    onViewHiding(aEvent) {
+      let doc = aEvent.target.ownerDocument;
+      let win = doc.defaultView;
+      if (win.CastPanel) {
+        win.CastPanel.onPanelHiding(aEvent);
+      }
+    },
+  },
 ];
 
 if (Services.prefs.getBoolPref("identity.fxaccounts.enabled")) {

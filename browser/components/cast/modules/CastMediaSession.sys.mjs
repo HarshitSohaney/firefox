@@ -17,6 +17,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   CastMediaHandler: "resource:///modules/cast/CastMediaHandler.sys.mjs",
 });
 
+/**
+ *
+ */
 export class CastMediaSession {
   constructor(castDevice) {
     this.castDevice = castDevice;
@@ -28,7 +31,9 @@ export class CastMediaSession {
 
   async start(mediaUrl, contentType, metadata = null) {
     if (this.state !== "idle") {
-      lazy.logConsole.warn(`Cannot start media session in state: ${this.state}`);
+      lazy.logConsole.warn(
+        `Cannot start media session in state: ${this.state}`
+      );
       throw new Error(`Cannot start media session in state: ${this.state}`);
     }
 
@@ -54,7 +59,12 @@ export class CastMediaSession {
 
       const finalMetadata = metadata || defaultMetadata;
 
-      await this.mediaHandler.load(mediaUrl, contentType, "BUFFERED", finalMetadata);
+      await this.mediaHandler.load(
+        mediaUrl,
+        contentType,
+        "BUFFERED",
+        finalMetadata
+      );
 
       lazy.logConsole.debug("Media LOAD sent to Cast device");
       this.setState("playing");
@@ -115,7 +125,10 @@ export class CastMediaSession {
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
 
-        if (status?.playerState === "IDLE" && status?.idleReason === "FINISHED") {
+        if (
+          status?.playerState === "IDLE" &&
+          status?.idleReason === "FINISHED"
+        ) {
           lazy.logConsole.debug("Media playback finished");
           this.setState("finished");
         } else if (status?.idleReason === "ERROR") {

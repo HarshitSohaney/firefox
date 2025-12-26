@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+/**
+ *
+ */
 export class SimpleHTTPServer {
   constructor() {
     this.serverSocket = null;
@@ -83,17 +86,16 @@ export class SimpleHTTPServer {
     }
   }
 
-  onStopListening(serverSocket, status) {
-  }
+  onStopListening(_serverSocket, _status) {}
 
   registerPathHandler(path, handler) {
     this.handlers.set(path, handler);
   }
 
   start(port = 0) {
-    this.serverSocket = Cc["@mozilla.org/network/server-socket;1"].createInstance(
-      Ci.nsIServerSocket
-    );
+    this.serverSocket = Cc[
+      "@mozilla.org/network/server-socket;1"
+    ].createInstance(Ci.nsIServerSocket);
 
     try {
       this.serverSocket.initDualStack(port, 4);
@@ -106,7 +108,7 @@ export class SimpleHTTPServer {
         },
         onStopListening(socket, status) {
           self.onStopListening(socket, status);
-        }
+        },
       });
 
       return this.port;
@@ -189,14 +191,13 @@ export class SimpleHTTPServer {
 
   getLocalHostname() {
     try {
-      const dnsService = Cc["@mozilla.org/network/dns-service;1"]
-        .getService(Ci.nsIDNSService);
+      const dnsService = Services.dns;
       let hostname = dnsService.myHostName;
-      if (hostname && hostname.length > 0) {
+      if (hostname && hostname.length) {
         if (!hostname.endsWith(".local")) {
           hostname += ".local";
         }
-        console.log(`SimpleHTTPServer: Got hostname: ${hostname}`);
+        console.warn(`SimpleHTTPServer: Got hostname: ${hostname}`);
         return hostname;
       }
     } catch (e) {

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use crate::vpx_ffi::*;
 use crate::webm_writer_ffi::WebMWriter;
 use libc::c_uint;
@@ -57,7 +61,10 @@ impl CastVideoEncoder {
 
             let ret = vpx_codec_enc_config_default(iface, cfg.as_mut(), 0);
             if ret != VPX_CODEC_OK {
-                eprintln!("CastVideoEncoder: vpx_codec_enc_config_default failed: {}", ret);
+                eprintln!(
+                    "CastVideoEncoder: vpx_codec_enc_config_default failed: {}",
+                    ret
+                );
                 return Err(nserror::NS_ERROR_FAILURE);
             }
 
@@ -87,7 +94,11 @@ impl CastVideoEncoder {
 
             let aligned = |v: u32, a: usize| -> usize {
                 let v = v as usize;
-                if v < a { a } else { (((v - 1) / a) + 1) * a }
+                if v < a {
+                    a
+                } else {
+                    (((v - 1) / a) + 1) * a
+                }
             };
 
             let y_stride = aligned(width, I420_STRIDE_ALIGN);
@@ -111,14 +122,21 @@ impl CastVideoEncoder {
                 return Err(nserror::NS_ERROR_OUT_OF_MEMORY);
             }
 
-            let vpx_ctx = VpxContext { ctx, img, img_buffer };
+            let vpx_ctx = VpxContext {
+                ctx,
+                img,
+                img_buffer,
+            };
             state.vpx_ctx = Some(vpx_ctx);
 
             let muxer = WebMWriter::new(width as i32, height as i32)
                 .map_err(|_| nserror::NS_ERROR_FAILURE)?;
 
             let header = muxer.get_header().map_err(|_| nserror::NS_ERROR_FAILURE)?;
-            eprintln!("CastVideoEncoder::init: Cached header of {} bytes", header.len());
+            eprintln!(
+                "CastVideoEncoder::init: Cached header of {} bytes",
+                header.len()
+            );
 
             state.cached_header = header;
             state.muxer = Some(muxer);
@@ -146,12 +164,19 @@ impl CastVideoEncoder {
 
         let expected_size = (width * height * 4) as usize;
         if rgba_data.len() != expected_size {
-            eprintln!("CastVideoEncoder: Invalid frame size, expected {}, got {}", expected_size, rgba_data.len());
+            eprintln!(
+                "CastVideoEncoder: Invalid frame size, expected {}, got {}",
+                expected_size,
+                rgba_data.len()
+            );
             return Err(nserror::NS_ERROR_INVALID_ARG);
         }
 
         if frame_count % 60 == 0 {
-            eprintln!("CastVideoEncoder: Frame {}: timestamp_ms={}", frame_count, timestamp_ms);
+            eprintln!(
+                "CastVideoEncoder: Frame {}: timestamp_ms={}",
+                frame_count, timestamp_ms
+            );
         }
 
         let should_force_kf = force_keyframe || frame_count % (fps as u64 * 2) == 0;
@@ -199,10 +224,7 @@ impl CastVideoEncoder {
 
                 if (*pkt).kind == VPX_CODEC_CX_FRAME_PKT {
                     let frame = &(*pkt).data.frame;
-                    let vp8_data = std::slice::from_raw_parts(
-                        frame.buf as *const u8,
-                        frame.sz,
-                    );
+                    let vp8_data = std::slice::from_raw_parts(frame.buf as *const u8, frame.sz);
                     let is_keyframe = (frame.flags & 1) != 0;
                     vp8_packets.push((vp8_data.to_vec(), is_keyframe));
                 }
@@ -213,7 +235,8 @@ impl CastVideoEncoder {
         let muxer = state.muxer.as_ref().unwrap();
         for (vp8_data, is_keyframe) in vp8_packets {
             let timestamp_us = (timestamp_ms * 1000) as i64;
-            let webm_cluster = muxer.write_frame(&vp8_data, timestamp_us, is_keyframe)
+            let webm_cluster = muxer
+                .write_frame(&vp8_data, timestamp_us, is_keyframe)
                 .map_err(|_| nserror::NS_ERROR_FAILURE)?;
             result.extend_from_slice(&webm_cluster);
         }
@@ -231,7 +254,10 @@ impl CastVideoEncoder {
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);
         }
 
-        eprintln!("CastVideoEncoder::get_header: Returning cached header of {} bytes", state.cached_header.len());
+        eprintln!(
+            "CastVideoEncoder::get_header: Returning cached header of {} bytes",
+            state.cached_header.len()
+        );
         let mut result = ThinVec::with_capacity(state.cached_header.len());
         result.extend_from_slice(&state.cached_header);
 
@@ -240,7 +266,10 @@ impl CastVideoEncoder {
 
     xpcom_method!(dump_test_webm => DumpTestWebM(frames: u32));
     fn dump_test_webm(&self, frames: u32) -> Result<(), nsresult> {
-        eprintln!("DumpTestWebM: Starting dump of {} frames to /tmp/test_webm.webm", frames);
+        eprintln!(
+            "DumpTestWebM: Starting dump of {} frames to /tmp/test_webm.webm",
+            frames
+        );
 
         let state = self.state.borrow();
 
@@ -279,13 +308,20 @@ impl CastVideoEncoder {
             eprintln!("DumpTestWebM: Encoding frame {}/{}", i + 1, frames);
             let timestamp_ms = ((i as u64) * 1000) / (fps as u64);
             let cluster = self.encode_frame(&rgba_thin, i == 0, timestamp_ms as i64)?;
-            eprintln!("DumpTestWebM: Frame {} generated {} bytes", i + 1, cluster.len());
+            eprintln!(
+                "DumpTestWebM: Frame {} generated {} bytes",
+                i + 1,
+                cluster.len()
+            );
             out.extend_from_slice(&cluster);
         }
 
         use std::fs::File;
         use std::io::Write;
-        eprintln!("DumpTestWebM: Writing {} bytes to /tmp/test_webm.webm", out.len());
+        eprintln!(
+            "DumpTestWebM: Writing {} bytes to /tmp/test_webm.webm",
+            out.len()
+        );
         let mut f = File::create("/tmp/test_webm.webm").map_err(|e| {
             eprintln!("DumpTestWebM: ERROR - Failed to create file: {:?}", e);
             nserror::NS_ERROR_FAILURE

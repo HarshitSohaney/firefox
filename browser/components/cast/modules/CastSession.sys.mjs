@@ -19,6 +19,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   CastMediaHandler: "resource:///modules/cast/CastMediaHandler.sys.mjs",
 });
 
+/**
+ *
+ */
 export class CastSession {
   constructor(castDevice, window) {
     this.castDevice = castDevice;
@@ -95,7 +98,12 @@ export class CastSession {
       this._encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
         Ci.nsICastVideoEncoder
       );
-      this._encoder.init(canvasWidth, canvasHeight, videoBitsPerSecond, this.fps);
+      this._encoder.init(
+        canvasWidth,
+        canvasHeight,
+        videoBitsPerSecond,
+        this.fps
+      );
 
       this._webmHeader = this._encoder.getHeader();
       this._frameCount = 0;
@@ -166,7 +174,9 @@ export class CastSession {
   handleStreamRequest(connection) {
     try {
       const connectTime = Date.now();
-      lazy.logConsole.debug(`Cast device connected to stream at ${connectTime}`);
+      lazy.logConsole.debug(
+        `Cast device connected to stream at ${connectTime}`
+      );
 
       const headers =
         "HTTP/1.1 200 OK\r\n" +
@@ -184,8 +194,10 @@ export class CastSession {
 
       connection.outputStream.write(headers, headers.length);
 
-      if (this._webmHeader && this._webmHeader.length > 0) {
-        lazy.logConsole.debug(`Sending WebM header: ${this._webmHeader.length} bytes`);
+      if (this._webmHeader && this._webmHeader.length) {
+        lazy.logConsole.debug(
+          `Sending WebM header: ${this._webmHeader.length} bytes`
+        );
         this.writeChunk(connection.outputStream, this._webmHeader);
       }
 
@@ -193,10 +205,14 @@ export class CastSession {
       this._frameCount = 0;
 
       if (this._receivedMediaStatus) {
-        lazy.logConsole.debug("Media status already received, starting encoding now");
+        lazy.logConsole.debug(
+          "Media status already received, starting encoding now"
+        );
         this.startCaptureLoop();
       } else {
-        lazy.logConsole.debug("Waiting for first MEDIA_STATUS before starting encoding...");
+        lazy.logConsole.debug(
+          "Waiting for first MEDIA_STATUS before starting encoding..."
+        );
         this._pendingStreamConnection = true;
       }
     } catch (e) {
@@ -226,17 +242,23 @@ export class CastSession {
 
   startCaptureLoop() {
     if (this._encodingStarted) {
-      lazy.logConsole.warn("startCaptureLoop called but encoding already started!");
+      lazy.logConsole.warn(
+        "startCaptureLoop called but encoding already started!"
+      );
       return;
     }
 
     this._encodingStarted = true;
     this._streamStartTime = Date.now();
     this._nextFrameTime = this._streamStartTime;
-    lazy.logConsole.debug(`Both stream connection and MEDIA_STATUS ready! Starting capture at: ${this._streamStartTime}`);
+    lazy.logConsole.debug(
+      `Both stream connection and MEDIA_STATUS ready! Starting capture at: ${this._streamStartTime}`
+    );
 
     const intervalMs = 1000 / this.fps;
-    lazy.logConsole.debug(`Started capture loop at ${this.fps} FPS (interval: ${intervalMs}ms)`);
+    lazy.logConsole.debug(
+      `Started capture loop at ${this.fps} FPS (interval: ${intervalMs}ms)`
+    );
 
     const captureLoop = async () => {
       if (!this._encodingStarted || !this.canvas) {
@@ -324,12 +346,18 @@ export class CastSession {
       const forceKeyframe = this._frameCount % this.fps === 0;
 
       if (this._frameCount % 60 === 0) {
-        lazy.logConsole.debug(`Frame ${this._frameCount}: timestamp=${timestampMs}ms, keyframe=${forceKeyframe}`);
+        lazy.logConsole.debug(
+          `Frame ${this._frameCount}: timestamp=${timestampMs}ms, keyframe=${forceKeyframe}`
+        );
       }
 
-      const webmCluster = this._encoder.encodeFrame(rgbaData, forceKeyframe, timestampMs);
+      const webmCluster = this._encoder.encodeFrame(
+        rgbaData,
+        forceKeyframe,
+        timestampMs
+      );
 
-      if (this.streamConnection && webmCluster && webmCluster.length > 0) {
+      if (this.streamConnection && webmCluster && webmCluster.length) {
         this.writeChunk(this.streamConnection.outputStream, webmCluster);
       }
 
@@ -440,7 +468,9 @@ export class CastSession {
           lazy.logConsole.debug("Received first MEDIA_STATUS");
 
           if (this._pendingStreamConnection && this.streamConnection) {
-            lazy.logConsole.debug("Stream connection is ready, starting encoding now");
+            lazy.logConsole.debug(
+              "Stream connection is ready, starting encoding now"
+            );
             this._pendingStreamConnection = false;
             this.startCaptureLoop();
           }

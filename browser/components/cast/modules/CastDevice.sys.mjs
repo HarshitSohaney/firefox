@@ -26,6 +26,9 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   });
 });
 
+/**
+ *
+ */
 export class CastDevice {
   constructor(id, address, port = DEFAULT_CAST_PORT) {
     this.id = id;
@@ -55,12 +58,16 @@ export class CastDevice {
         this._emit("stateChanged", state);
 
         if (state === "connected" && this._connectResolve) {
-          lazy.logConsole.debug(`Connection successful to ${this.address}:${this.port}`);
+          lazy.logConsole.debug(
+            `Connection successful to ${this.address}:${this.port}`
+          );
           this._connectResolve();
           this._connectResolve = null;
           this._connectReject = null;
         } else if (state === "error" && this._connectReject) {
-          lazy.logConsole.warn(`Connection failed to ${this.address}:${this.port}`);
+          lazy.logConsole.warn(
+            `Connection failed to ${this.address}:${this.port}`
+          );
           this._connectReject(new Error("Connection failed"));
           this._connectResolve = null;
           this._connectReject = null;
@@ -86,14 +93,18 @@ export class CastDevice {
   }
 
   async addCertificateOverride() {
-    lazy.logConsole.debug(`Adding certificate override for ${this.address}:${this.port}`);
+    lazy.logConsole.debug(
+      `Adding certificate override for ${this.address}:${this.port}`
+    );
     await this._addCastCertOverride();
     lazy.logConsole.debug(`Certificate override added successfully`);
   }
 
   async connect() {
     if (this.state === "connected") {
-      lazy.logConsole.debug(`Already connected to ${this.address}:${this.port}, skipping`);
+      lazy.logConsole.debug(
+        `Already connected to ${this.address}:${this.port}, skipping`
+      );
       return Promise.resolve();
     }
 
@@ -122,7 +133,9 @@ export class CastDevice {
     const cert = await this._getCertForHost(this.address, this.port);
 
     if (!cert) {
-      lazy.logConsole.error(`Failed to retrieve certificate for ${this.address}:${this.port}`);
+      lazy.logConsole.error(
+        `Failed to retrieve certificate for ${this.address}:${this.port}`
+      );
       throw new Error("Could not retrieve certificate for Cast device");
     }
 
@@ -132,8 +145,12 @@ export class CastDevice {
 
     // cast devices use self signed certs!!!
     if (issuer !== subject) {
-      lazy.logConsole.warn(`Certificate verification failed: issuer=${issuer}, subject=${subject}`);
-      throw new Error("Certificate is not self-signed - not a valid Cast device");
+      lazy.logConsole.warn(
+        `Certificate verification failed: issuer=${issuer}, subject=${subject}`
+      );
+      throw new Error(
+        "Certificate is not self-signed - not a valid Cast device"
+      );
     }
 
     lazy.logConsole.debug("Certificate verified as self-signed");
@@ -202,9 +219,9 @@ export class CastDevice {
         const listener = {
           QueryInterface: ChromeUtils.generateQI(["nsIStreamListener"]),
 
-          onStartRequest(aRequest) {},
+          onStartRequest(_aRequest) {},
 
-          onDataAvailable(aRequest, aInputStream, aOffset, aCount) {},
+          onDataAvailable(_aRequest, _aInputStream, _aOffset, _aCount) {},
 
           onStopRequest(aRequest, aStatus) {
             try {
@@ -216,7 +233,9 @@ export class CastDevice {
                 return;
               }
 
-              lazy.logConsole.warn(`No certificate available (status: 0x${aStatus.toString(16)})`);
+              lazy.logConsole.warn(
+                `No certificate available (status: 0x${aStatus.toString(16)})`
+              );
               rejectOnce(
                 new Error(
                   `No certificate available (status: 0x${aStatus.toString(16)})`
@@ -283,9 +302,14 @@ export class CastDevice {
   sendMessageTo(destinationId, namespace, payload) {
     try {
       const parsed = JSON.parse(payload);
-      lazy.logConsole.debug(`-> Sending to ${destinationId} [${namespace}]:`, parsed);
+      lazy.logConsole.debug(
+        `-> Sending to ${destinationId} [${namespace}]:`,
+        parsed
+      );
     } catch (e) {
-      lazy.logConsole.debug(`-> Sending to ${destinationId} [${namespace}]: ${payload}`);
+      lazy.logConsole.debug(
+        `-> Sending to ${destinationId} [${namespace}]: ${payload}`
+      );
     }
     this._xpcomDevice.sendMessageTo(destinationId, namespace, payload);
   }
@@ -301,7 +325,9 @@ export class CastDevice {
     this.sendMessage(CAST_NAMESPACES.RECEIVER, payload);
     const transportId = await this._waitForTransportId(5000);
     if (transportId) {
-      lazy.logConsole.debug(`App launched successfully, transportId: ${transportId}`);
+      lazy.logConsole.debug(
+        `App launched successfully, transportId: ${transportId}`
+      );
     } else {
       lazy.logConsole.warn(`App launch failed: no transportId received`);
     }

@@ -25,9 +25,13 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 
 ChromeUtils.defineESModuleGetters(lazy, {
   CastDevice: "resource:///modules/cast/CastDevice.sys.mjs",
+  CastDiscovery: "resource:///modules/cast/CastDiscovery.sys.mjs",
   CastSession: "resource:///modules/cast/CastSession.sys.mjs",
 });
 
+/**
+ *
+ */
 export class CastService extends EventTarget {
   static #instance = null;
 
@@ -35,6 +39,7 @@ export class CastService extends EventTarget {
   #sessions = new Map();
   #stateListeners = new Set();
   #initialized = false;
+  #discovery = null;
 
   #_state = {
     enabled: false,
@@ -64,7 +69,10 @@ export class CastService extends EventTarget {
 
   static get() {
     if (!this.#instance) {
-      throw new CastError("CastService not initialized", CAST_ERRORS.UNINITIALIZED);
+      throw new CastError(
+        "CastService not initialized",
+        CAST_ERRORS.UNINITIALIZED
+      );
     }
     return this.#instance;
   }
@@ -77,14 +85,16 @@ export class CastService extends EventTarget {
   #registerObserver() {
     const observer = {
       QueryInterface: ChromeUtils.generateQI(["nsIObserver"]),
-      observe: (subject, topic, data) => {
+      observe: (_subject, topic, _data) => {
         if (topic === "quit-application") {
-          lazy.logConsole.debug("Firefox quitting, cleaning up Cast sessions and devices");
+          lazy.logConsole.debug(
+            "Firefox quitting, cleaning up Cast sessions and devices"
+          );
           this.cleanupOnQuit();
         }
-      }
+      },
     };
-    Services.obs.addObserver(observer, "quit-application", false);
+    Services.obs.addObserver(observer, "quit-application");
   }
 
   #initialize() {
@@ -102,6 +112,8 @@ export class CastService extends EventTarget {
   }
 
   #cleanup() {
+    this.stopDiscovery();
+
     for (const [deviceId, device] of this.#devices) {
       try {
         device.disconnect();
@@ -137,7 +149,9 @@ export class CastService extends EventTarget {
 
     const deviceId = `manual-${ipAddress}`;
     if (this.#devices.has(deviceId)) {
-      lazy.logConsole.debug(`Device ${deviceId} already exists, returning existing device`);
+      lazy.logConsole.debug(
+        `Device ${deviceId} already exists, returning existing device`
+      );
       return this.#devices.get(deviceId);
     }
 
@@ -185,8 +199,8 @@ export class CastService extends EventTarget {
     }
   }
 
-  async testConnection(deviceId) {
-    lazy.logConsole.debug(`Testing connection to device: ${deviceId}`);
+  async connectAndLaunchApp(deviceId) {
+    lazy.logConsole.debug(`Connecting to device: ${deviceId}`);
     const device = this.#devices.get(deviceId);
     if (!device) {
       throw new CastError(
@@ -196,17 +210,18 @@ export class CastService extends EventTarget {
     }
 
     try {
+      await device.addCertificateOverride();
       await device.connect();
       const result = await device.launchApp();
       lazy.logConsole.debug(
-        `Connection test successful for ${deviceId}`,
+        `Connected and launched app for ${deviceId}`,
         result
       );
       return result;
     } catch (error) {
-      lazy.logConsole.error(`Connection test failed for ${deviceId}:`, error);
+      lazy.logConsole.error(`Failed to connect to ${deviceId}:`, error);
       throw new CastError(
-        `Connection test failed: ${error.message}`,
+        `Connection failed: ${error.message}`,
         CAST_ERRORS.CONNECTION_FAILED
       );
     }
@@ -215,14 +230,9 @@ export class CastService extends EventTarget {
   async startTabCasting(deviceId, browser, window, options = {}) {
     lazy.logConsole.debug(`Starting tab casting for device: ${deviceId}`);
 
-    const device = this.#devices.get(deviceId);
-    if (!device) {
-      throw new CastError(
-        `Device ${deviceId} not found`,
-        CAST_ERRORS.DEVICE_NOT_FOUND
-      );
-    }
+    await this.connectAndLaunchApp(deviceId);
 
+    const device = this.#devices.get(deviceId);
     const sessionId = `session-${deviceId}-${Date.now()}`;
     const session = new lazy.CastSession(device, window);
 
@@ -236,7 +246,10 @@ export class CastService extends EventTarget {
       return result;
     } catch (error) {
       this.#sessions.delete(sessionId);
-      lazy.logConsole.error(`Failed to start tab casting for ${deviceId}:`, error);
+      lazy.logConsole.error(
+        `Failed to start tab casting for ${deviceId}:`,
+        error
+      );
       throw new CastError(
         `Tab casting failed: ${error.message}`,
         CAST_ERRORS.CAPTURE_FAILED
@@ -258,6 +271,16 @@ export class CastService extends EventTarget {
       }
     }
 
+    const device = this.#devices.get(deviceId);
+    if (device) {
+      try {
+        device.disconnect();
+        lazy.logConsole.debug(`Device ${deviceId} disconnected`);
+      } catch (error) {
+        lazy.logConsole.error(`Error disconnecting device ${deviceId}:`, error);
+      }
+    }
+
     this.#_state.activeSessionCount = this.#sessions.size;
     this.stateUpdate();
   }
@@ -265,17 +288,112 @@ export class CastService extends EventTarget {
   async stopCasting() {
     lazy.logConsole.debug("Stopping all casting");
 
+    const connectedDeviceIds = new Set();
     for (const [sessionId, session] of this.#sessions) {
       try {
         await session.stop();
+        const deviceIdMatch = sessionId.match(/^session-(.+)-\d+$/);
+        if (deviceIdMatch) {
+          connectedDeviceIds.add(deviceIdMatch[1]);
+        }
       } catch (error) {
         lazy.logConsole.error(`Error stopping session ${sessionId}:`, error);
+      }
+    }
+
+    for (const deviceId of connectedDeviceIds) {
+      const device = this.#devices.get(deviceId);
+      if (device) {
+        try {
+          device.disconnect();
+          lazy.logConsole.debug(`Device ${deviceId} disconnected`);
+        } catch (error) {
+          lazy.logConsole.error(`Error disconnecting device ${deviceId}:`, error);
+        }
       }
     }
 
     this.#sessions.clear();
     this.#_state.activeSessionCount = 0;
     this.stateUpdate();
+  }
+
+  async startDiscovery() {
+    if (!this.#discovery) {
+      lazy.logConsole.debug("Creating new CastDiscovery instance");
+      this.#discovery = new lazy.CastDiscovery();
+      this.#discovery.addListener({
+        onDeviceFound: device => this.#onDeviceDiscovered(device),
+        onDeviceLost: name => this.#onDeviceLost(name),
+      });
+    }
+
+    try {
+      await this.#discovery.start();
+      lazy.logConsole.debug("Discovery started successfully");
+    } catch (error) {
+      lazy.logConsole.error("Failed to start discovery:", error);
+      throw error;
+    }
+  }
+
+  stopDiscovery() {
+    if (this.#discovery) {
+      lazy.logConsole.debug("Stopping discovery");
+      this.#discovery.stop();
+    }
+  }
+
+  #onDeviceDiscovered(deviceInfo) {
+    lazy.logConsole.debug("Device discovered:", deviceInfo.friendlyName);
+
+    const deviceId = `discovered-${deviceInfo.name}`;
+
+    if (this.#devices.has(deviceId)) {
+      lazy.logConsole.debug("Device already exists, skipping");
+      return;
+    }
+
+    const device = new lazy.CastDevice(
+      deviceId,
+      deviceInfo.host,
+      deviceInfo.port
+    );
+    device.friendlyName = deviceInfo.friendlyName;
+
+    this.#devices.set(deviceId, device);
+
+    device.addEventListener("stateChanged", state => {
+      lazy.logConsole.debug(`Device ${deviceId} state changed: ${state}`);
+      this.#notifyStateListeners(state, device);
+    });
+
+    device.addEventListener("error", error => {
+      lazy.logConsole.error(`Device ${deviceId} error:`, error);
+      this.#notifyStateListeners(CAST_STATES.ERROR, device);
+    });
+
+    this.#updateDeviceList();
+    this.dispatchEvent(
+      new CustomEvent("CastService:DeviceAdded", { detail: device })
+    );
+  }
+
+  #onDeviceLost(name) {
+    lazy.logConsole.debug("Device lost:", name);
+    const deviceId = `discovered-${name}`;
+
+    if (this.#devices.has(deviceId)) {
+      const device = this.#devices.get(deviceId);
+      device.disconnect();
+      this.#devices.delete(deviceId);
+      this.#updateDeviceList();
+      this.dispatchEvent(
+        new CustomEvent("CastService:DeviceRemoved", {
+          detail: { id: deviceId },
+        })
+      );
+    }
   }
 
   addStateListener(listener) {
@@ -292,7 +410,10 @@ export class CastService extends EventTarget {
       try {
         device.disconnect();
       } catch (error) {
-        lazy.logConsole.error(`Error disconnecting device ${device.id}:`, error);
+        lazy.logConsole.error(
+          `Error disconnecting device ${device.id}:`,
+          error
+        );
       }
     }
   }

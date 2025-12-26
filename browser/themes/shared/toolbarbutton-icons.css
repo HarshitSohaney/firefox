@@ -52,7 +52,7 @@
 }
 
 #cast-button {
-  list-style-image: url("chrome://browser/skin/icons/cast.svg");
+  list-style-image: url("chrome://browser/skin/cast/cast-icon.svg");
 }
 
 #history-panelmenu {

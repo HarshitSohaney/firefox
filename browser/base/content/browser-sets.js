@@ -37,7 +37,12 @@ document.addEventListener(
             MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
             break;
           case "Browser:CastTab":
-            gCastUI.openPanel();
+            {
+              const castButton = document.getElementById("cast-button");
+              if (castButton) {
+                castButton.click();
+              }
+            }
             break;
           case "cmd_pageSetup":
             PrintUtils.showPageSetup();

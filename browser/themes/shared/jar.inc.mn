@@ -82,6 +82,8 @@
   skin/classic/browser/downloads/notification-finish-animation.svg       (../shared/downloads/notification-finish-animation.svg)
   skin/classic/browser/downloads/notification-start-animation.svg        (../shared/downloads/notification-start-animation.svg)
   skin/classic/browser/downloads/progressmeter.css             (../shared/downloads/progressmeter.css)
+  skin/classic/browser/cast/cast.css                           (../shared/cast/cast.css)
+  skin/classic/browser/cast/cast-icon.svg                      (../shared/cast/cast-icon.svg)
   skin/classic/browser/drm-icon.svg                            (../shared/drm-icon.svg)
   skin/classic/browser/formautofill/icon-capture-address-fields.svg      (../shared/formautofill/icon-capture-address-fields.svg)
   skin/classic/browser/formautofill/icon-capture-email-fields.svg        (../shared/formautofill/icon-capture-email-fields.svg)

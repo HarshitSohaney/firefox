@@ -5,6 +5,8 @@
 with Files("**"):
     BUG_COMPONENT = ("Firefox", "Cast")
 
+JAR_MANIFESTS += ["jar.mn"]
+
 XPIDL_SOURCES += [
     "nsICastDevice.idl",
     "nsICastVideoEncoder.idl",
@@ -22,6 +24,7 @@ EXTRA_JS_MODULES.cast = [
     "CastService.sys.mjs",
     "modules/CastConstants.mjs",
     "modules/CastDevice.sys.mjs",
+    "modules/CastDiscovery.sys.mjs",
     "modules/CastError.mjs",
     "modules/CastMediaHandler.sys.mjs",
     "modules/CastMediaSession.sys.mjs",

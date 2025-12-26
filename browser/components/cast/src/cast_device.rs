@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 use crate::constants::{namespaces, CAST_PORT, RECEIVER_ID, SENDER_ID};
 use crate::handlers::{ConnectionHandler, ReceiverHandler};
 use crate::message::CastMessage;
@@ -9,8 +13,8 @@ use std::cell::RefCell;
 use std::ffi::CStr;
 use thin_vec::ThinVec;
 use xpcom::interfaces::{
-    nsICastDeviceCallback, nsIInputStream, nsIInputStreamPump,
-    nsIOutputStream, nsISocketTransport, nsISocketTransportService,
+    nsICastDeviceCallback, nsIInputStream, nsIInputStreamPump, nsIOutputStream, nsISocketTransport,
+    nsISocketTransportService,
 };
 use xpcom::{xpcom_method, RefPtr};
 
@@ -142,11 +146,15 @@ impl CastDevice {
 
         self.notify_state_change(DeviceState::Connecting);
 
-        let sts_service = xpcom::components::SocketTransport::service::<nsISocketTransportService>()
-            .map_err(|e| {
-                println!("CastDevice: Failed to get socket transport service: {:?}", e);
-                NS_ERROR_FAILURE
-            })?;
+        let sts_service = xpcom::components::SocketTransport::service::<nsISocketTransportService>(
+        )
+        .map_err(|e| {
+            println!(
+                "CastDevice: Failed to get socket transport service: {:?}",
+                e
+            );
+            NS_ERROR_FAILURE
+        })?;
 
         let mut socket_types = ThinVec::new();
         socket_types.push(nsCString::from("ssl"));
@@ -169,13 +177,12 @@ impl CastDevice {
             return Err(NS_ERROR_FAILURE);
         }
 
-        let transport: RefPtr<nsISocketTransport> = unsafe { RefPtr::from_raw(transport_ptr as *mut _).unwrap() };
+        let transport: RefPtr<nsISocketTransport> =
+            unsafe { RefPtr::from_raw(transport_ptr as *mut _).unwrap() };
         self.inner.borrow_mut().transport = Some(transport.clone());
 
         let mut output_stream_ptr: *const nsIOutputStream = std::ptr::null();
-        let rv = unsafe {
-            transport.OpenOutputStream(0, 0, 0, &mut output_stream_ptr as *mut _)
-        };
+        let rv = unsafe { transport.OpenOutputStream(0, 0, 0, &mut output_stream_ptr as *mut _) };
 
         if rv.failed() || output_stream_ptr.is_null() {
             println!("CastDevice: Failed to open output stream");
@@ -183,13 +190,12 @@ impl CastDevice {
             return Err(NS_ERROR_FAILURE);
         }
 
-        let output_stream: RefPtr<nsIOutputStream> = unsafe { RefPtr::from_raw(output_stream_ptr as *mut _).unwrap() };
+        let output_stream: RefPtr<nsIOutputStream> =
+            unsafe { RefPtr::from_raw(output_stream_ptr as *mut _).unwrap() };
         self.inner.borrow_mut().output_stream = Some(output_stream);
 
         let mut input_stream_ptr: *const nsIInputStream = std::ptr::null();
-        let rv = unsafe {
-            transport.OpenInputStream(0, 0, 0, &mut input_stream_ptr as *mut _)
-        };
+        let rv = unsafe { transport.OpenInputStream(0, 0, 0, &mut input_stream_ptr as *mut _) };
 
         if rv.failed() || input_stream_ptr.is_null() {
             println!("CastDevice: Failed to open input stream");
@@ -202,12 +208,10 @@ impl CastDevice {
 
         let contract_id = CStr::from_bytes_with_nul(b"@mozilla.org/network/input-stream-pump;1\0")
             .map_err(|_| NS_ERROR_FAILURE)?;
-        let pump = xpcom::create_instance::<nsIInputStreamPump>(contract_id)
-            .ok_or(NS_ERROR_FAILURE)?;
+        let pump =
+            xpcom::create_instance::<nsIInputStreamPump>(contract_id).ok_or(NS_ERROR_FAILURE)?;
 
-        let rv = unsafe {
-            pump.Init(input_stream.coerce(), 0, 0, false, std::ptr::null())
-        };
+        let rv = unsafe { pump.Init(input_stream.coerce(), 0, 0, false, std::ptr::null()) };
 
         if rv.failed() {
             println!("CastDevice: Failed to initialize input stream pump");
@@ -247,17 +251,19 @@ impl CastDevice {
         Ok(())
     }
 
-    pub fn send_message_internal(
-        &self,
-        namespace: &str,
-        payload: &str,
-    ) -> Result<(), nsresult> {
+    pub fn send_message_internal(&self, namespace: &str, payload: &str) -> Result<(), nsresult> {
         let destination = if namespace == namespaces::MEDIA {
             if let Some(transport_id) = self.get_transport_id() {
-                println!("CastDevice: Routing media message to app transport: {}", transport_id);
+                println!(
+                    "CastDevice: Routing media message to app transport: {}",
+                    transport_id
+                );
                 transport_id
             } else {
-                println!("CastDevice: WARNING - No transport ID, sending media message to {}", RECEIVER_ID);
+                println!(
+                    "CastDevice: WARNING - No transport ID, sending media message to {}",
+                    RECEIVER_ID
+                );
                 RECEIVER_ID.to_string()
             }
         } else {
@@ -281,7 +287,10 @@ impl CastDevice {
             } else {
                 format!(" to {}", &destination_id[..8.min(destination_id.len())])
             };
-            println!("CastDevice: -> [{}] {}{}", namespace_short, msg_type, dest_suffix);
+            println!(
+                "CastDevice: -> [{}] {}{}",
+                namespace_short, msg_type, dest_suffix
+            );
         }
 
         let inner = self.inner.borrow();
@@ -337,13 +346,27 @@ impl CastDevice {
     }
 
     xpcom_method!(send_message_to_xpcom => SendMessageTo(destination_id: *const nsACString, namespace: *const nsACString, payload: *const nsACString));
-    fn send_message_to_xpcom(&self, destination_id: &nsACString, namespace: &nsACString, payload: &nsACString) -> Result<(), nsresult> {
-        self.send_message_to(&destination_id.to_utf8(), &namespace.to_utf8(), &payload.to_utf8())
+    fn send_message_to_xpcom(
+        &self,
+        destination_id: &nsACString,
+        namespace: &nsACString,
+        payload: &nsACString,
+    ) -> Result<(), nsresult> {
+        self.send_message_to(
+            &destination_id.to_utf8(),
+            &namespace.to_utf8(),
+            &payload.to_utf8(),
+        )
     }
 
     xpcom_method!(get_callback => GetCallback() -> *const nsICastDeviceCallback);
     pub fn get_callback(&self) -> Result<RefPtr<nsICastDeviceCallback>, nsresult> {
-        self.inner.borrow().callback.as_ref().cloned().ok_or(NS_ERROR_NOT_AVAILABLE)
+        self.inner
+            .borrow()
+            .callback
+            .as_ref()
+            .cloned()
+            .ok_or(NS_ERROR_NOT_AVAILABLE)
     }
 
     xpcom_method!(set_callback => SetCallback(callback: *const nsICastDeviceCallback));
@@ -359,14 +382,19 @@ impl CastDevice {
 
     xpcom_method!(get_app_transport_id => GetAppTransportId() -> nsACString);
     fn get_app_transport_id(&self) -> Result<nsCString, nsresult> {
-        Ok(self.inner.borrow().app_transport_id.as_ref()
+        Ok(self
+            .inner
+            .borrow()
+            .app_transport_id
+            .as_ref()
             .map(|s| nsCString::from(s.as_str()))
             .unwrap_or_else(nsCString::new))
     }
 
     xpcom_method!(get_app_session_id_xpcom => GetAppSessionId() -> nsACString);
     fn get_app_session_id_xpcom(&self) -> Result<nsCString, nsresult> {
-        Ok(self.get_app_session_id()
+        Ok(self
+            .get_app_session_id()
             .map(|s| nsCString::from(s.as_str()))
             .unwrap_or_else(nsCString::new))
     }

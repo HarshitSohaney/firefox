@@ -2,193 +2,258 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var gCastUI = {
-  _castService: null,
+var gCastService;
+
+var CastPanel = {
   _initialized: false,
-  _connectedDeviceId: null,
+  _deviceItems: new Map(),
+
+  get panel() {
+    return document.getElementById("castPanel");
+  },
+
+  get deviceList() {
+    return document.getElementById("castPanel-deviceList");
+  },
+
+  get emptyState() {
+    return document.getElementById("castPanel-emptyState");
+  },
+
+  get activeSession() {
+    return document.getElementById("castPanel-activeSession");
+  },
+
+  get castingLabel() {
+    return document.getElementById("castPanel-castingLabel");
+  },
 
   init() {
-    console.warn("gCastUI: Starting initialization...");
+    console.warn("CastPanel: Starting initialization...");
 
     try {
-      const { gCastService } = ChromeUtils.importESModule(
+      const { gCastService: service } = ChromeUtils.importESModule(
         "resource:///modules/cast/CastService.sys.mjs"
       );
-      this._castService = gCastService;
-      this._castService.addStateListener(this.onStateChange.bind(this));
+      gCastService = service;
+
+      gCastService.addEventListener(
+        "CastService:StateUpdate",
+        this.onStateUpdate.bind(this)
+      );
+      gCastService.addEventListener(
+        "CastService:DeviceAdded",
+        this.onDeviceAdded.bind(this)
+      );
+      gCastService.addEventListener(
+        "CastService:DeviceRemoved",
+        this.onDeviceRemoved.bind(this)
+      );
+
+      const manualAddButton = document.getElementById("castPanel-manualAdd");
+      manualAddButton.addEventListener("command", () => this.onManualAdd());
+
+      const stopButton = document.getElementById("castPanel-stopButton");
+      stopButton.addEventListener("command", () => this.onStopCasting());
 
       this._initialized = true;
-      console.warn("gCastUI: Initialized successfully");
+      console.warn("CastPanel: Initialized successfully");
     } catch (ex) {
-      console.error("gCastUI: Failed to initialize:", ex);
-      console.error("gCastUI: Error stack:", ex.stack);
+      console.error("CastPanel: Failed to initialize:", ex);
+      console.error("CastPanel: Error stack:", ex.stack);
     }
   },
 
-  async openPanel() {
-    console.warn("gCastUI: openPanel() called");
-    console.warn("gCastUI: Initialized?", this._initialized);
-
+  onPanelShowing(_aEvent) {
+    console.warn("CastPanel: Panel showing");
     if (!this._initialized) {
-      console.error("gCastUI: Not initialized yet!");
-      alert("Cast service not ready. Please try again.");
       return;
     }
 
-    console.warn("gCastUI: Showing IP prompt");
+    this.updateDeviceList();
+    this.updateActiveSession();
+
+    if (gCastService.startDiscovery) {
+      gCastService.startDiscovery().catch(err => {
+        console.error("CastPanel: Failed to start discovery:", err);
+      });
+    }
+  },
+
+  onPanelHiding(_aEvent) {
+    console.warn("CastPanel: Panel hiding");
+  },
+
+  updateDeviceList() {
+    this.deviceList.innerHTML = "";
+    this._deviceItems.clear();
+
+    const state = gCastService.state;
+    const devices = state.devices || [];
+
+    if (devices.length === 0) {
+      this.emptyState.hidden = false;
+      this.deviceList.hidden = true;
+    } else {
+      this.emptyState.hidden = true;
+      this.deviceList.hidden = false;
+
+      for (const device of devices) {
+        this.addDeviceItem(device);
+      }
+    }
+  },
+
+  addDeviceItem(device) {
+    const item = document.createXULElement("richlistitem");
+    item.setAttribute("deviceId", device.id);
+    item.className = "cast-device-item";
+
+    const label = document.createXULElement("label");
+    label.textContent = device.friendlyName || device.address || device.id;
+    label.className = "cast-device-name";
+
+    item.appendChild(label);
+
+    item.addEventListener("command", () => this.onDeviceSelected(device.id));
+    item.addEventListener("click", () => this.onDeviceSelected(device.id));
+
+    this.deviceList.appendChild(item);
+    this._deviceItems.set(device.id, item);
+  },
+
+  onDeviceSelected(deviceId) {
+    console.warn("CastPanel: Device selected:", deviceId);
+
+    if (!gCastService) {
+      console.error("CastPanel: Cast service not initialized");
+      return;
+    }
+
+    const browser = gBrowser.selectedBrowser;
+    gCastService
+      .startTabCasting(deviceId, browser, window, { fps: 24, bitrate: 4000000 })
+      .then(() => {
+        console.warn("CastPanel: Casting started successfully");
+        this.updateActiveSession();
+        CastButton.updateIndicator();
+        PanelMultiView.hidePopup(this.panel);
+      })
+      .catch(error => {
+        console.error("CastPanel: Failed to start casting:", error);
+        alert(`Failed to start casting: ${error.message}`);
+      });
+  },
+
+  async onManualAdd() {
     const deviceIP = prompt("Enter Cast device IP address:", "192.168.1.100");
 
-    console.warn("gCastUI: User entered:", deviceIP);
-
     if (!deviceIP) {
-      console.warn("gCastUI: User cancelled");
       return;
     }
 
     try {
-      console.warn("gCastUI: Adding manual device");
-      const device = await this._castService.addManualDevice(deviceIP);
+      console.warn("CastPanel: Adding manual device:", deviceIP);
+      const device = await gCastService.addManualDevice(deviceIP);
 
-      console.warn(
-        "gCastUI: Device added successfully, starting cast to device:",
-        device.id
-      );
-      this.startCasting(device.id);
-    } catch (error) {
-      console.error("gCastUI: Failed to add device:", error);
-      alert(
-        `Failed to add Cast device: ${error.message}\n\nMake sure the device is reachable and is a valid Cast device.`
-      );
-    }
-  },
+      console.warn("CastPanel: Device added, testing connection");
+      await gCastService.testConnection(device.id);
 
-  async startCasting(deviceId) {
-    try {
-      console.warn("gCastUI: Starting connection test to device", deviceId);
-
-      await this._castService.testConnection(deviceId);
-
-      console.warn("gCastUI: Connection test successful!");
-
-      this._connectedDeviceId = deviceId;
-      this.showConnectedNotification();
-    } catch (ex) {
-      console.error("gCastUI: Connection test failed:", ex);
-      console.error("gCastUI: Error stack:", ex.stack);
-      alert(
-        `Connection failed: ${ex.message}\n\nCheck Browser Console for details.`
-      );
-    }
-  },
-
-  showConnectedNotification() {
-    const notificationBox = gBrowser.getNotificationBox();
-
-    notificationBox.appendNotification(
-      "cast-connected",
-      {
-        label: "Cast device connected. Click to cast this tab.",
-        priority: notificationBox.PRIORITY_INFO_HIGH,
-      },
-      [
-        {
-          label: "Cast This Tab",
-          callback: () => {
-            this.startTabCasting(this._connectedDeviceId);
-          },
-        },
-        {
-          label: "Disconnect",
-          callback: () => {
-            this.stopCasting();
-          },
-        },
-      ]
-    );
-  },
-
-  async stopCasting() {
-    try {
-      console.warn("gCastUI: Stopping cast");
-      await this._castService.stopCasting();
-      console.warn("gCastUI: Casting stopped");
-    } catch (ex) {
-      console.error("gCastUI: Failed to stop casting:", ex);
-    }
-  },
-
-  async startTabCasting(deviceId) {
-    try {
-      console.warn("gCastUI: Starting tab casting to device", deviceId);
-
+      console.warn("CastPanel: Connection successful, starting casting");
       const browser = gBrowser.selectedBrowser;
-      const result = await this._castService.startTabCasting(
-        deviceId,
-        browser,
-        window,
-        { fps: 24, bitrate: 4000000 }
-      );
+      await gCastService.startTabCasting(device.id, browser, window, {
+        fps: 24,
+        bitrate: 4000000,
+      });
 
-      console.warn("gCastUI: Tab casting started:", result);
-      this.showCastingNotification();
-
-      return result;
-    } catch (ex) {
-      console.error("gCastUI: Tab casting failed:", ex);
-      alert(
-        `Tab casting failed: ${ex.message}\n\nCheck Browser Console for details.`
-      );
-      throw ex;
+      this.updateActiveSession();
+      CastButton.updateIndicator();
+      PanelMultiView.hidePopup(this.panel);
+    } catch (error) {
+      console.error("CastPanel: Manual device add/cast failed:", error);
+      alert(`Failed to add or cast to device: ${error.message}`);
     }
   },
 
-  showCastingNotification() {
-    const notificationBox = gBrowser.getNotificationBox();
-
-    const connectedNotif =
-      notificationBox.getNotificationWithValue("cast-connected");
-    if (connectedNotif) {
-      notificationBox.removeNotification(connectedNotif);
-    }
-
-    notificationBox.appendNotification(
-      "cast-active",
-      {
-        label: "Casting tab to device",
-        priority: notificationBox.PRIORITY_INFO_HIGH,
-      },
-      [
-        {
-          label: "Stop Casting",
-          callback: () => {
-            this.stopCasting();
-          },
-        },
-      ]
-    );
+  onStopCasting() {
+    console.warn("CastPanel: Stopping casting");
+    gCastService
+      .stopCasting()
+      .then(() => {
+        console.warn("CastPanel: Casting stopped");
+        this.updateActiveSession();
+        CastButton.updateIndicator();
+      })
+      .catch(error => {
+        console.error("CastPanel: Failed to stop casting:", error);
+      });
   },
 
-  onStateChange(state, _session) {
-    console.warn("gCastUI: Cast state changed to", state);
+  onStateUpdate() {
+    console.warn("CastPanel: State updated");
+    this.updateDeviceList();
+    this.updateActiveSession();
+    CastButton.updateIndicator();
+  },
 
-    if (state === "idle" || state === "error") {
-      const notificationBox = gBrowser.getNotificationBox();
+  onDeviceAdded(event) {
+    console.warn("CastPanel: Device added:", event.detail);
+    this.updateDeviceList();
+  },
 
-      const activeNotif =
-        notificationBox.getNotificationWithValue("cast-active");
-      if (activeNotif) {
-        notificationBox.removeNotification(activeNotif);
-      }
+  onDeviceRemoved(event) {
+    console.warn("CastPanel: Device removed:", event.detail);
+    this.updateDeviceList();
+  },
 
-      const connectedNotif =
-        notificationBox.getNotificationWithValue("cast-connected");
-      if (connectedNotif) {
-        notificationBox.removeNotification(connectedNotif);
-      }
+  updateActiveSession() {
+    const state = gCastService.state;
+    const isActive = state.activeSessionCount > 0;
+
+    if (isActive) {
+      this.activeSession.hidden = false;
+      this.castingLabel.textContent = "Casting to device...";
+    } else {
+      this.activeSession.hidden = true;
+    }
+  },
+};
+
+var CastButton = {
+  _initialized: false,
+
+  get button() {
+    return document.getElementById("cast-button");
+  },
+
+  init() {
+    console.warn("CastButton: Initializing");
+    if (!gCastService) {
+      console.warn("CastButton: Cast service not available");
+      return;
+    }
+
+    this._initialized = true;
+    this.updateIndicator();
+  },
+
+  updateIndicator() {
+    if (!this._initialized || !this.button) {
+      return;
+    }
+
+    const state = gCastService.state;
+    const isActive = state.activeSessionCount > 0;
+
+    if (isActive) {
+      this.button.setAttribute("attention", "true");
+    } else {
+      this.button.removeAttribute("attention");
     }
   },
 };
 
 window.addEventListener("load", () => {
-  gCastUI.init();
+  CastPanel.init();
+  CastButton.init();
 });
