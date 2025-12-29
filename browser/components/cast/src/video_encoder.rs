@@ -76,6 +76,11 @@ impl CastVideoEncoder {
             cfg.g_error_resilient = 1;
             cfg.g_lag_in_frames = 0;
             cfg.g_threads = 2;
+            cfg.rc_end_usage = VPX_VBR;
+            cfg.rc_min_quantizer = 4;
+            cfg.rc_max_quantizer = 48;
+            cfg.kf_mode = VPX_KF_AUTO;
+            cfg.kf_max_dist = fps * 2;
 
             let mut ctx: Box<vpx_codec_ctx> = Box::new(std::mem::zeroed());
 
@@ -91,6 +96,10 @@ impl CastVideoEncoder {
                 eprintln!("CastVideoEncoder: vpx_codec_enc_init_ver failed: {}", ret);
                 return Err(nserror::NS_ERROR_FAILURE);
             }
+
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_CPUUSED, -5);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_STATIC_THRESHOLD, 0);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_TOKEN_PARTITIONS, 2);
 
             let aligned = |v: u32, a: usize| -> usize {
                 let v = v as usize;
@@ -383,24 +392,24 @@ fn rgba_to_i420(
         for y in 0..height {
             for x in 0..width {
                 let rgba_idx = ((y * width + x) * 4) as usize;
-                let r = rgba[rgba_idx] as f32;
-                let g = rgba[rgba_idx + 1] as f32;
-                let b = rgba[rgba_idx + 2] as f32;
+                let r = rgba[rgba_idx] as i32;
+                let g = rgba[rgba_idx + 1] as i32;
+                let b = rgba[rgba_idx + 2] as i32;
 
-                let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
+                let y_val = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
                 let y_idx = y as usize * y_stride + x as usize;
-                y_plane[y_idx] = y_val;
+                y_plane[y_idx] = y_val.clamp(16, 235) as u8;
 
                 if x % 2 == 0 && y % 2 == 0 {
-                    let u_val = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-                    let v_val = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+                    let u_val = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+                    let v_val = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
 
                     let uv_y = (y / 2) as usize;
                     let uv_x = (x / 2) as usize;
                     let uv_idx = uv_y * u_stride + uv_x;
 
-                    u_plane[uv_idx] = u_val;
-                    v_plane[uv_idx] = v_val;
+                    u_plane[uv_idx] = u_val.clamp(16, 240) as u8;
+                    v_plane[uv_idx] = v_val.clamp(16, 240) as u8;
                 }
             }
         }

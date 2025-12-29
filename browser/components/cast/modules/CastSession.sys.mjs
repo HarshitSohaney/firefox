@@ -44,6 +44,8 @@ export class CastSession {
     this.lastCaptureTime = 0;
     this._receivedMediaStatus = false;
     this._pendingStreamConnection = null;
+    this._pendingFrames = 0;
+    this._droppedFrames = 0;
   }
 
   async start(browser, options = {}) {
@@ -61,8 +63,8 @@ export class CastSession {
       this.width = browser.clientWidth || 1280;
       this.height = browser.clientHeight || 720;
 
-      const maxWidth = 1280;
-      const maxHeight = 720;
+      const maxWidth = 1920;
+      const maxHeight = 1080;
       let canvasWidth = this.width;
       let canvasHeight = this.height;
 
@@ -88,8 +90,11 @@ export class CastSession {
         willReadFrequently: false,
       });
 
-      this.fps = options.fps || 24;
-      const videoBitsPerSecond = options.bitrate || 4000000;
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.imageSmoothingQuality = "high";
+
+      this.fps = options.fps || 30;
+      const videoBitsPerSecond = options.bitrate || 25000000;
 
       lazy.logConsole.debug(
         `Canvas ${canvasWidth}x${canvasHeight} @ ${this.fps}fps, ${Math.floor(videoBitsPerSecond / 1000)}kbps`
@@ -151,7 +156,13 @@ export class CastSession {
         metadataType: 0,
         title: "Firefox Tab Cast",
       };
-      await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
+      await this.mediaHandler.load(
+        streamURL,
+        "video/webm",
+        "LIVE",
+        metadata,
+        true
+      );
 
       lazy.logConsole.debug(
         "Media LOAD sent to Cast device. Waiting for MEDIA_STATUS response..."
@@ -238,6 +249,10 @@ export class CastSession {
     const chunkFooter = "\r\n";
     outputStream.write(chunkFooter, chunkFooter.length);
     outputStream.flush();
+
+    if (this._pendingFrames > 0) {
+      this._pendingFrames--;
+    }
   }
 
   startCaptureLoop() {
@@ -317,10 +332,14 @@ export class CastSession {
       }
 
       const rect = new DOMRect(scrollX, scrollY, this.width, this.height);
+      const flags =
+        browsingContext.currentWindowGlobal.DRAWSNAPSHOT_DRAW_CARET |
+        browsingContext.currentWindowGlobal.DRAWSNAPSHOT_USE_WIDGET_LAYERS;
       const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
         rect,
         scale,
-        "rgb(255, 255, 255)"
+        "rgb(255, 255, 255)",
+        flags
       );
 
       if (!this.ctx) {
@@ -328,8 +347,12 @@ export class CastSession {
           alpha: false,
           willReadFrequently: true,
         });
+        this.ctx.imageSmoothingEnabled = true;
+        this.ctx.imageSmoothingQuality = "high";
       }
 
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.imageSmoothingQuality = "high";
       this.ctx.drawImage(snapshot, 0, 0, this.canvas.width, this.canvas.height);
       snapshot.close();
 
@@ -358,7 +381,22 @@ export class CastSession {
       );
 
       if (this.streamConnection && webmCluster && webmCluster.length) {
-        this.writeChunk(this.streamConnection.outputStream, webmCluster);
+        if (this._pendingFrames > 60) {
+          this._droppedFrames++;
+          if (this._droppedFrames % 30 === 1) {
+            lazy.logConsole.warn(
+              `Dropped ${this._droppedFrames} frames, pending: ${this._pendingFrames}. Resyncing timestamps...`
+            );
+            const lagMs = this._pendingFrames * (1000 / this.fps);
+            this._streamStartTime = Date.now() - 100;
+            lazy.logConsole.debug(
+              `Reset stream clock, was ${lagMs}ms behind, now ~100ms`
+            );
+          }
+        } else {
+          this._pendingFrames++;
+          this.writeChunk(this.streamConnection.outputStream, webmCluster);
+        }
       }
 
       this._frameCount++;

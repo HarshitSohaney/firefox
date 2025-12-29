@@ -13,6 +13,13 @@ pub const VPX_CODEC_USE_OUTPUT_PARTITION: c_ulong = 0x20000;
 
 pub const VPX_CODEC_CX_FRAME_PKT: c_int = 0;
 
+pub const VPX_VBR: c_int = 0;
+pub const VPX_KF_AUTO: c_uint = 1;
+
+pub const VP8E_SET_CPUUSED: c_int = 13;
+pub const VP8E_SET_STATIC_THRESHOLD: c_int = 14;
+pub const VP8E_SET_TOKEN_PARTITIONS: c_int = 10;
+
 #[repr(C)]
 pub struct vpx_rational {
     pub num: c_int,
@@ -76,7 +83,23 @@ pub struct vpx_codec_enc_cfg_t {
     pub rc_twopass_stats_in: *mut c_void,
     pub rc_firstpass_mb_stats_in: *mut c_void,
     pub rc_target_bitrate: c_uint,
-    _padding: [u8; 512],
+    pub rc_min_quantizer: c_uint,
+    pub rc_max_quantizer: c_uint,
+    pub rc_undershoot_pct: c_uint,
+    pub rc_overshoot_pct: c_uint,
+    pub rc_buf_sz: c_uint,
+    pub rc_buf_initial_sz: c_uint,
+    pub rc_buf_optimal_sz: c_uint,
+    pub rc_2pass_vbr_bias_pct: c_uint,
+    pub rc_2pass_vbr_minsection_pct: c_uint,
+    pub rc_2pass_vbr_maxsection_pct: c_uint,
+    pub rc_2pass_vbr_corpus_complexity: c_uint,
+    pub kf_mode: c_uint,
+    pub kf_min_dist: c_uint,
+    pub kf_max_dist: c_uint,
+    pub ss_number_layers: c_uint,
+    pub ts_number_layers: c_uint,
+    _padding: [u8; 400],
 }
 
 #[repr(C)]
@@ -123,6 +146,13 @@ extern "C" {
         cfg: *const vpx_codec_enc_cfg_t,
         flags: c_ulong,
         ver: c_int,
+    ) -> c_int;
+
+    #[link_name = "vpx_codec_control_"]
+    pub fn vpx_codec_control(
+        ctx: *mut vpx_codec_ctx,
+        ctrl_id: c_int,
+        ...
     ) -> c_int;
 
     pub fn vpx_codec_encode(

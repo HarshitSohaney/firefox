@@ -56,7 +56,13 @@ export class CastMediaHandler {
     }
   }
 
-  async load(contentId, contentType, streamType = "LIVE", metadata = null) {
+  async load(
+    contentId,
+    contentType,
+    streamType = "LIVE",
+    metadata = null,
+    lowLatency = false
+  ) {
     lazy.logConsole.debug(`Loading media: ${contentId}`);
     const media = {
       contentId,
@@ -66,6 +72,14 @@ export class CastMediaHandler {
 
     if (streamType === "LIVE") {
       media.duration = -1;
+      if (lowLatency) {
+        media.customData = {
+          liveSeekableRange: {
+            start: 0,
+            end: 0,
+          },
+        };
+      }
     }
 
     if (metadata) {
@@ -76,6 +90,10 @@ export class CastMediaHandler {
       media,
       autoplay: true,
     };
+
+    if (lowLatency) {
+      loadCommand.currentTime = 0;
+    }
 
     const requestId = await this.sendMediaCommand("LOAD", loadCommand);
     lazy.logConsole.debug(`Media load sent, requestId: ${requestId}`);
