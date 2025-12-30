@@ -149,11 +149,7 @@ extern "C" {
     ) -> c_int;
 
     #[link_name = "vpx_codec_control_"]
-    pub fn vpx_codec_control(
-        ctx: *mut vpx_codec_ctx,
-        ctrl_id: c_int,
-        ...
-    ) -> c_int;
+    pub fn vpx_codec_control(ctx: *mut vpx_codec_ctx, ctrl_id: c_int, ...) -> c_int;
 
     pub fn vpx_codec_encode(
         ctx: *mut vpx_codec_ctx,

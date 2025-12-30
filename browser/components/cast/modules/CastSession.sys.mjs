@@ -20,7 +20,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 /**
- *
+ * Manages tab casting to a Cast device.
+ * Handles screen capture, VP9 encoding, HTTP streaming, and media session coordination.
  */
 export class CastSession {
   constructor(castDevice, window) {
@@ -48,6 +49,12 @@ export class CastSession {
     this._droppedFrames = 0;
   }
 
+  /**
+   * Start casting the tab to the Cast device.
+   *
+   * @param {object} browser The browser element containing the tab to cast
+   * @param {object} options Configuration options (fps, bitrate)
+   */
   async start(browser, options = {}) {
     if (this.state !== "idle") {
       lazy.logConsole.warn(`Cannot start session in state: ${this.state}`);
@@ -182,6 +189,12 @@ export class CastSession {
     }
   }
 
+  /**
+   * Handle HTTP request from Cast device for video stream.
+   * Sends WebM header and starts frame encoding once ready.
+   *
+   * @param {object} connection HTTP connection object with input/output streams
+   */
   handleStreamRequest(connection) {
     try {
       const connectTime = Date.now();
@@ -234,6 +247,12 @@ export class CastSession {
     }
   }
 
+  /**
+   * Write data as HTTP chunked transfer encoding.
+   *
+   * @param {nsIOutputStream} outputStream HTTP output stream
+   * @param {Array<number>} data Byte array to send
+   */
   writeChunk(outputStream, data) {
     const chunkSize = data.length.toString(16);
     const chunkHeader = `${chunkSize}\r\n`;
@@ -381,12 +400,14 @@ export class CastSession {
       );
 
       if (this.streamConnection && webmCluster && webmCluster.length) {
+        // Drop frames if too many are pending to prevent unbounded lag
         if (this._pendingFrames > 60) {
           this._droppedFrames++;
           if (this._droppedFrames % 30 === 1) {
             lazy.logConsole.warn(
               `Dropped ${this._droppedFrames} frames, pending: ${this._pendingFrames}. Resyncing timestamps...`
             );
+            // Reset stream clock to recover from lag
             const lagMs = this._pendingFrames * (1000 / this.fps);
             this._streamStartTime = Date.now() - 100;
             lazy.logConsole.debug(

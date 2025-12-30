@@ -30,7 +30,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 /**
- *
+ * Singleton service managing Cast device discovery, connections, and casting sessions.
+ * Coordinates between device management, mDNS discovery, and active casting operations.
  */
 export class CastService extends EventTarget {
   static #instance = null;
@@ -170,8 +171,6 @@ export class CastService extends EventTarget {
     this.#devices.set(deviceId, device);
 
     try {
-      // sends a TLS handshake through a channel using uri https://{hostname}:{port}
-      // which sends back the cert. Then we can use the certOverrideService to add an exception
       await device.addCertificateOverride();
       lazy.logConsole.debug(`Device ${deviceId} added successfully`);
       this.#updateDeviceList();
@@ -308,7 +307,10 @@ export class CastService extends EventTarget {
           device.disconnect();
           lazy.logConsole.debug(`Device ${deviceId} disconnected`);
         } catch (error) {
-          lazy.logConsole.error(`Error disconnecting device ${deviceId}:`, error);
+          lazy.logConsole.error(
+            `Error disconnecting device ${deviceId}:`,
+            error
+          );
         }
       }
     }

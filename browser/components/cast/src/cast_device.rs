@@ -18,6 +18,8 @@ use xpcom::interfaces::{
 };
 use xpcom::{xpcom_method, RefPtr};
 
+/// Internal state for CastDevice XPCOM component.
+/// Holds connection state, XPCOM interfaces, and app session information.
 struct CastDeviceInner {
     state: DeviceState,
     callback: Option<RefPtr<nsICastDeviceCallback>>,
@@ -84,6 +86,8 @@ impl CastDeviceInner {
     }
 }
 
+/// XPCOM component implementing nsICastDevice.
+/// Manages TLS connection to Cast device, sends/receives Cast protocol messages.
 #[xpcom::xpcom(implement(nsICastDevice), atomic)]
 pub struct CastDevice {
     inner: RefCell<CastDeviceInner>,
@@ -236,9 +240,12 @@ impl CastDevice {
 
         println!("CastDevice: Async listener started, sending initial messages");
 
+        // Cast protocol handshake sequence:
+        // 1. CONNECT message to connection namespace establishes virtual connection
         let connect_payload = ConnectionHandler::create_connect_message();
         self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
 
+        // 2. GET_STATUS message to receiver namespace queries current receiver state
         let get_status = {
             let inner = self.inner.borrow();
             inner.receiver_handler.create_get_status()
@@ -251,6 +258,14 @@ impl CastDevice {
         Ok(())
     }
 
+    /// Send message with automatic destination routing.
+    ///
+    /// Destination routing rules:
+    /// - Media messages go to the app's transport ID (e.g., "web-12345") if an app is running
+    /// - All other messages go to "receiver-0" (the main Cast receiver)
+    ///
+    /// This is important because media control messages must be sent to the specific
+    /// app instance that is handling the media, not to the receiver itself.
     pub fn send_message_internal(&self, namespace: &str, payload: &str) -> Result<(), nsresult> {
         let destination = if namespace == namespaces::MEDIA {
             if let Some(transport_id) = self.get_transport_id() {
@@ -273,6 +288,26 @@ impl CastDevice {
         self.send_message_to(&destination, namespace, payload)
     }
 
+    /// Send a Cast protocol message to a specific destination.
+    ///
+    /// Cast Protocol Message Flow:
+    /// 1. Create CastMessage protobuf with source_id, destination_id, namespace, and JSON payload
+    /// 2. Encode to protobuf bytes
+    /// 3. Frame with 4-byte big-endian length prefix
+    /// 4. Write to TLS output stream
+    ///
+    /// Example wire format for PING message:
+    /// ```text
+    /// [0x00, 0x00, 0x00, 0x4A]  <- 74 bytes message length
+    /// [protobuf bytes containing:
+    ///   protocol_version: 0
+    ///   source_id: "sender-0"
+    ///   destination_id: "receiver-0"
+    ///   namespace: "urn:x-cast:com.google.cast.tp.heartbeat"
+    ///   payload_type: 0 (String)
+    ///   payload_utf8: "{\"type\":\"PING\"}"
+    /// ]
+    /// ```
     pub fn send_message_to(
         &self,
         destination_id: &str,
@@ -296,6 +331,7 @@ impl CastDevice {
         let inner = self.inner.borrow();
         let stream = inner.output_stream.as_ref().ok_or(NS_ERROR_NOT_AVAILABLE)?;
 
+        // Step 1: Create CastMessage protobuf structure
         let cast_message = CastMessage::new(
             SENDER_ID.to_string(),
             destination_id.to_string(),
@@ -303,13 +339,17 @@ impl CastDevice {
             payload.to_string(),
         );
 
+        // Step 2: Encode protobuf to bytes
         let message_bytes = cast_message.encode_to_vec().map_err(|_| NS_ERROR_FAILURE)?;
 
+        // Step 3: Frame with 4-byte big-endian length prefix
+        // Wire format: [u32 length][protobuf bytes]
         let length = (message_bytes.len() as u32).to_be_bytes();
         let mut framed_message = Vec::with_capacity(4 + message_bytes.len());
         framed_message.extend_from_slice(&length);
         framed_message.extend_from_slice(&message_bytes);
 
+        // Step 4: Write framed message to TLS output stream
         let mut bytes_written = 0u32;
         let rv = unsafe {
             stream.Write(

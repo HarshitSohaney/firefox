@@ -3,7 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
- *
+ * Custom error type for Cast operations.
+ * Includes error cause code and supports serialization for IPC.
  */
 export class CastError extends Error {
   name = "CastError";

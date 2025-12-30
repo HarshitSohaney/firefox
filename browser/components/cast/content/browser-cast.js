@@ -4,6 +4,10 @@
 
 var gCastService;
 
+/**
+ * UI controller for the Cast device selection panel.
+ * Displays available devices, manages manual device addition, and controls active sessions.
+ */
 var CastPanel = {
   _initialized: false,
   _deviceItems: new Map(),

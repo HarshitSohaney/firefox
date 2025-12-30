@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- *
+ * Minimal HTTP server for streaming video to Cast devices.
+ * Supports chunked transfer encoding and CORS headers.
  */
 export class SimpleHTTPServer {
   constructor() {

@@ -2,6 +2,132 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/**
+ * Cast Protocol v2 Implementation Overview
+ * =========================================
+ *
+ * This module implements the Google Cast Protocol v2 for casting content
+ * to Cast-enabled devices (Chromecast, Android TV, smart displays, etc.).
+ *
+ * PROTOCOL ARCHITECTURE:
+ * ----------------------
+ * The implementation is split between Rust (low-level protocol) and
+ * JavaScript (high-level session management):
+ *
+ * - Rust (cast_device.rs, stream_listener.rs):
+ *   * TLS connection via nsISocketTransport
+ *   * Protocol Buffer encoding/decoding
+ *   * Message framing (4-byte length prefix)
+ *   * Automatic PING/PONG heartbeat responses
+ *   * App lifecycle management (LAUNCH, CONNECT to app)
+ *
+ * - JavaScript (this file):
+ *   * Promise-based API wrapper over XPCOM
+ *   * Event system for UI updates
+ *   * Heartbeat timer initiation
+ *   * High-level app and media control
+ *
+ * CAST PROTOCOL MESSAGE FORMAT:
+ * -----------------------------
+ * All messages are sent over TLS (port 8009) using this wire format:
+ *
+ * [4 bytes: message length (big-endian u32)]
+ * [N bytes: Protocol Buffer encoded CastMessage]
+ *
+ * The CastMessage protobuf contains:
+ * - protocol_version: Always 0 for Cast v2
+ * - source_id: "sender-0" (our identifier)
+ * - destination_id: "receiver-0" or app transport ID
+ * - namespace: Protocol namespace (see NAMESPACES below)
+ * - payload_type: 0 (String/JSON) or 1 (Binary)
+ * - payload_utf8: JSON message payload
+ *
+ * CAST PROTOCOL NAMESPACES:
+ * -------------------------
+ * The protocol uses different namespaces for different operations:
+ *
+ * 1. CONNECTION (urn:x-cast:com.google.cast.tp.connection)
+ *    - CONNECT: Establish virtual connection to receiver or app
+ *    - CLOSE: Close virtual connection
+ *    - Must CONNECT before using other namespaces
+ *
+ * 2. HEARTBEAT (urn:x-cast:com.google.cast.tp.heartbeat)
+ *    - PING: Keepalive from sender (every 5 seconds)
+ *    - PONG: Response from receiver
+ *    - Device disconnects after ~30 seconds without PING
+ *
+ * 3. RECEIVER (urn:x-cast:com.google.cast.receiver)
+ *    - GET_STATUS: Query receiver state
+ *    - RECEIVER_STATUS: Response with running apps
+ *    - LAUNCH: Start a receiver application
+ *    - STOP: Stop a receiver application
+ *    - LAUNCH_ERROR: Error response for failed launch
+ *
+ * 4. MEDIA (urn:x-cast:com.google.cast.media)
+ *    - LOAD: Load and play media URL
+ *    - PLAY: Resume playback
+ *    - PAUSE: Pause playback
+ *    - STOP: Stop playback
+ *    - SEEK: Jump to specific time
+ *    - MEDIA_STATUS: Status updates from device
+ *
+ * COMPLETE PROTOCOL FLOW FOR TAB CASTING:
+ * ----------------------------------------
+ * 1. TLS Connection:
+ *    - Connect to device IP:8009 with TLS
+ *    - Accept self-signed certificate
+ *
+ * 2. Initial Handshake:
+ *    -> CONNECT (connection namespace, to receiver-0)
+ *    <- CONNECTED
+ *    -> GET_STATUS (receiver namespace)
+ *    <- RECEIVER_STATUS (empty applications array)
+ *
+ * 3. Start Heartbeat:
+ *    -> PING (heartbeat namespace, every 5 seconds)
+ *    <- PONG (automatic response)
+ *
+ * 4. Launch App:
+ *    -> LAUNCH (receiver namespace, appId: CC1AD845 = DefaultMediaReceiver)
+ *    <- RECEIVER_STATUS (with app in applications array)
+ *       - Parse app.sessionId (for STOP later)
+ *       - Parse app.transportId (for media messages)
+ *
+ * 5. Connect to App:
+ *    -> CONNECT (connection namespace, to app.transportId)
+ *    <- CONNECTED
+ *
+ * 6. Load Media:
+ *    -> LOAD (media namespace, to app.transportId)
+ *       - contentId: HTTP URL to media stream
+ *       - contentType: "video/webm"
+ *       - streamType: "LIVE"
+ *    <- MEDIA_STATUS (with mediaSessionId)
+ *
+ * 7. During Playback:
+ *    <- MEDIA_STATUS (periodic updates with playerState, currentTime)
+ *    -> PLAY/PAUSE/STOP (with mediaSessionId from LOAD response)
+ *
+ * 8. Cleanup:
+ *    -> STOP (media namespace)
+ *    -> STOP (receiver namespace, with sessionId)
+ *    -> CLOSE (connection namespace, to app.transportId)
+ *    -> CLOSE (connection namespace, to receiver-0)
+ *    - Close TLS connection
+ *
+ * MESSAGE ROUTING:
+ * ---------------
+ * - Messages to receiver-0: Receiver control (LAUNCH, STOP, GET_STATUS)
+ * - Messages to app transport ID: Media control (LOAD, PLAY, PAUSE)
+ * - The Rust code automatically routes media messages to the correct destination
+ *
+ * For more details, see:
+ * - ARCHITECTURE.md: Overall system architecture
+ * - src/message.rs: Protocol Buffer definitions
+ * - src/cast_device.rs: Message sending implementation
+ * - src/stream_listener.rs: Message receiving and parsing
+ */
+
 import {
   setInterval,
   clearInterval,
@@ -27,7 +153,9 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
 });
 
 /**
- *
+ * JavaScript wrapper for the Rust XPCOM Cast protocol implementation.
+ * Provides Promise-based API over the callback-based XPCOM component.
+ * Manages TLS connection, message sending, heartbeat, and app lifecycle.
  */
 export class CastDevice {
   constructor(id, address, port = DEFAULT_CAST_PORT) {
@@ -125,6 +253,10 @@ export class CastDevice {
     });
   }
 
+  /**
+   * Add certificate override for Cast device's self-signed certificate.
+   * Cast devices use self-signed certificates, so we must manually verify and trust them.
+   */
   async _addCastCertOverride() {
     const overrideService = Cc[
       "@mozilla.org/security/certoverride;1"
@@ -143,7 +275,6 @@ export class CastDevice {
     const issuer = cert.issuerName;
     const subject = cert.subjectName;
 
-    // cast devices use self signed certs!!!
     if (issuer !== subject) {
       lazy.logConsole.warn(
         `Certificate verification failed: issuer=${issuer}, subject=${subject}`
@@ -163,6 +294,13 @@ export class CastDevice {
     );
   }
 
+  /**
+   * Retrieve TLS certificate from host by initiating a connection.
+   *
+   * @param {string} hostname Device IP address or hostname
+   * @param {number} port Port number (typically 8009)
+   * @returns {Promise<nsIX509Cert>} Certificate from the TLS handshake
+   */
   async _getCertForHost(hostname, port) {
     lazy.logConsole.debug(`Fetching certificate from ${hostname}:${port}`);
 
@@ -256,6 +394,17 @@ export class CastDevice {
     });
   }
 
+  /**
+   * Start sending PING messages to keep connection alive.
+   *
+   * Cast protocol requires heartbeat messages:
+   * - Send PING every 5 seconds to HEARTBEAT namespace
+   * - Device responds with PONG
+   * - If device doesn't receive PING for ~30 seconds, it will disconnect
+   *
+   * The PING/PONG is handled automatically in Rust (stream_listener.rs),
+   * but we initiate the PINGs from JavaScript to ensure regular keepalives.
+   */
   _startHeartbeat() {
     if (this._heartbeatTimer) {
       return;
@@ -314,6 +463,27 @@ export class CastDevice {
     this._xpcomDevice.sendMessageTo(destinationId, namespace, payload);
   }
 
+  /**
+   * Launch a Cast receiver application.
+   *
+   * Cast App Launch Protocol:
+   * 1. Send LAUNCH message to RECEIVER namespace with app ID
+   *    - CC1AD845 = DefaultMediaReceiver (handles generic media)
+   *    - YouTube, Netflix, etc. have their own app IDs
+   *
+   * 2. Device responds with RECEIVER_STATUS containing:
+   *    - sessionId: Unique ID for this app instance
+   *    - transportId: Destination for sending messages to this app
+   *
+   * 3. We must CONNECT to the app's transport ID before sending media commands
+   *
+   * 4. The Rust code (stream_listener.rs) automatically:
+   *    - Parses RECEIVER_STATUS
+   *    - Stores session/transport IDs
+   *    - Sends CONNECT to the transport ID
+   *
+   * @param {string} appId Cast application ID (defaults to DefaultMediaReceiver)
+   */
   async launchApp(appId = CAST_APP_IDS.DEFAULT_MEDIA_RECEIVER) {
     lazy.logConsole.debug(`Launching app: ${appId}`);
     const payload = JSON.stringify({
@@ -351,6 +521,12 @@ export class CastDevice {
     this.sendMessage(CAST_NAMESPACES.RECEIVER, payload);
   }
 
+  /**
+   * Poll for app transport ID after launching app.
+   *
+   * @param {number} timeoutMs Maximum time to wait in milliseconds
+   * @returns {Promise<string|null>} Transport ID string or null if timeout
+   */
   async _waitForTransportId(timeoutMs) {
     const startTime = Date.now();
     const pollInterval = 50;

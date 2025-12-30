@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- *
+ * Child-side actor running in the content process during tab casting.
+ * Provides viewport information and extracts video URLs from pages.
  */
 export class CastTabChild extends JSWindowActorChild {
   getViewportInfo() {

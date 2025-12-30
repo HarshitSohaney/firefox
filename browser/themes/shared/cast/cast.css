@@ -7,8 +7,8 @@
 }
 
 #cast-indicator-anchor {
-  min-width: 16px;
-  min-height: 16px;
+  min-width: var(--size-item-small);
+  min-height: var(--size-item-small);
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
 }
@@ -20,13 +20,13 @@
 #cast-button[attention="true"]::after {
   content: "";
   position: absolute;
-  bottom: 4px;
-  right: 4px;
+  bottom: var(--space-xsmall);
+  right: var(--space-xsmall);
   width: 6px;
   height: 6px;
   background: var(--toolbarbutton-icon-fill-attention, #0060df);
   border: 1px solid var(--toolbar-bgcolor);
-  border-radius: 50%;
+  border-radius: var(--border-radius-circle);
 }
 
 #castPanel-mainView {
@@ -45,7 +45,7 @@
 }
 
 .cast-device-item {
-  padding: 8px 12px;
+  padding: var(--space-small) var(--space-medium);
   border: none;
   margin: 0;
   cursor: pointer;
@@ -60,11 +60,11 @@
 }
 
 .cast-device-name {
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 
 #castPanel-activeSession {
-  padding: 12px;
+  padding: var(--space-medium);
   background-color: var(--panel-separator-color);
   border-top: 1px solid var(--panel-separator-color);
 }
@@ -72,18 +72,18 @@
 .cast-active-indicator {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-small);
 }
 
 #castPanel-castingLabel {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--toolbarbutton-icon-fill-attention, #0060df);
 }
 
 #castPanel-stopButton {
-  padding: 6px 12px;
+  padding: 6px var(--space-medium);
 }
 
 #castPanel-manualAdd {
-  padding: 8px 12px;
+  padding: var(--space-small) var(--space-medium);
 }

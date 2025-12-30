@@ -18,7 +18,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 /**
- *
+ * Manages casting of remote media URLs (not tab content).
+ * Simpler than CastSession as the Cast device fetches content directly.
  */
 export class CastMediaSession {
   constructor(castDevice) {

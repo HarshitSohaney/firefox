@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- *
+ * Parent-side actor for communicating with content processes during tab casting.
+ * Retrieves viewport information and handles video fullscreen events.
  */
 export class CastTabParent extends JSWindowActorParent {
   async getViewportInfo() {

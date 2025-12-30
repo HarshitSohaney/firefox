@@ -16,6 +16,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   setInterval: "resource://gre/modules/Timer.sys.mjs",
 });
 
+/**
+ * Discovers Cast devices on the local network using mDNS.
+ * Sends DNS-SD queries and parses responses for _googlecast._tcp.local services.
+ */
 export class CastDiscovery {
   static MDNS_ADDR = "224.0.0.251";
   static MDNS_PORT = 5353;
@@ -150,6 +154,10 @@ export class CastDiscovery {
     }
   }
 
+  /**
+   * Build mDNS query packet for Cast device discovery.
+   * Constructs DNS query for _googlecast._tcp.local service.
+   */
   #buildDnsQuery() {
     const serviceName = CastDiscovery.SERVICE_TYPE;
     const parts = serviceName.split(".");
@@ -179,7 +187,7 @@ export class CastDiscovery {
     try {
       const response = this.#parseDnsResponse(data);
 
-      if (response.answers.length > 0 || response.additionals.length > 0) {
+      if (response.answers.length || response.additionals.length) {
         lazy.logConsole.debug(
           "Received mDNS response with",
           response.answers.length,
@@ -189,7 +197,12 @@ export class CastDiscovery {
         );
 
         for (const answer of response.answers) {
-          lazy.logConsole.debug("Answer type:", answer.type, "name:", answer.name);
+          lazy.logConsole.debug(
+            "Answer type:",
+            answer.type,
+            "name:",
+            answer.name
+          );
           if (answer.type === "PTR") {
             this.#handlePtrRecord(answer, response);
           }
@@ -200,6 +213,12 @@ export class CastDiscovery {
     }
   }
 
+  /**
+   * Parse mDNS response packet.
+   * Extracts PTR, SRV, TXT, and A records from DNS packet format.
+   *
+   * @param {string} data Raw DNS packet data
+   */
   #parseDnsResponse(data) {
     const response = {
       answers: [],
@@ -216,11 +235,13 @@ export class CastDiscovery {
 
     let offset = 12;
 
+    // Helper to read DNS name with compression pointer support
     const readName = pos => {
       let name = "";
       let length = data.charCodeAt(pos);
 
       while (length > 0) {
+        // Check for DNS compression pointer (top 2 bits set)
         if ((length & 0xc0) === 0xc0) {
           const pointer = ((length & 0x3f) << 8) | data.charCodeAt(pos + 1);
           name += readName(pointer);
@@ -271,15 +292,8 @@ export class CastDiscovery {
       const type = (data.charCodeAt(offset) << 8) | data.charCodeAt(offset + 1);
       offset += 2;
 
-      const recordClass =
-        (data.charCodeAt(offset) << 8) | data.charCodeAt(offset + 1);
       offset += 2;
 
-      const ttl =
-        (data.charCodeAt(offset) << 24) |
-        (data.charCodeAt(offset + 1) << 16) |
-        (data.charCodeAt(offset + 2) << 8) |
-        data.charCodeAt(offset + 3);
       offset += 4;
 
       const dataLength =
@@ -333,15 +347,8 @@ export class CastDiscovery {
       const type = (data.charCodeAt(offset) << 8) | data.charCodeAt(offset + 1);
       offset += 2;
 
-      const recordClass =
-        (data.charCodeAt(offset) << 8) | data.charCodeAt(offset + 1);
       offset += 2;
 
-      const ttl =
-        (data.charCodeAt(offset) << 24) |
-        (data.charCodeAt(offset + 1) << 16) |
-        (data.charCodeAt(offset + 2) << 8) |
-        data.charCodeAt(offset + 3);
       offset += 4;
 
       const dataLength =
@@ -393,6 +400,13 @@ export class CastDiscovery {
     return response;
   }
 
+  /**
+   * Process PTR record pointing to Cast device.
+   * Extracts device info from associated SRV, TXT, and A records.
+   *
+   * @param {object} ptrRecord PTR record with device instance name
+   * @param {object} fullResponse Full DNS response containing all records
+   */
   #handlePtrRecord(ptrRecord, fullResponse) {
     const instanceName = ptrRecord.target;
 
@@ -412,7 +426,11 @@ export class CastDiscovery {
           txtRecord = record;
         }
       }
-      if (srvRecord && record.name === srvRecord.target && record.type === "A") {
+      if (
+        srvRecord &&
+        record.name === srvRecord.target &&
+        record.type === "A"
+      ) {
         aRecord = record;
       }
     }
@@ -442,17 +460,6 @@ export class CastDiscovery {
         listener.onDeviceFound?.(device);
       } catch (e) {
         lazy.logConsole.error("Error in device found listener:", e);
-      }
-    }
-  }
-
-  #notifyDeviceLost(name) {
-    lazy.logConsole.debug("Notifying device lost:", name);
-    for (const listener of this.#listeners) {
-      try {
-        listener.onDeviceLost?.(name);
-      } catch (e) {
-        lazy.logConsole.error("Error in device lost listener:", e);
       }
     }
   }
