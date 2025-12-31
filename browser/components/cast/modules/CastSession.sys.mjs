@@ -70,11 +70,30 @@ export class CastSession {
       this.width = browser.clientWidth || 1280;
       this.height = browser.clientHeight || 720;
 
+      const minWidth = 1280;
+      const minHeight = 720;
       const maxWidth = 1920;
       const maxHeight = 1080;
       let canvasWidth = this.width;
       let canvasHeight = this.height;
 
+      lazy.logConsole.debug(
+        `Browser size: ${this.width}x${this.height}, devicePixelRatio: ${this.window.devicePixelRatio}`
+      );
+
+      // Scale UP if below minimum (ensures at least 720p quality)
+      if (canvasWidth < minWidth || canvasHeight < minHeight) {
+        const widthRatio = minWidth / canvasWidth;
+        const heightRatio = minHeight / canvasHeight;
+        const scaleRatio = Math.max(widthRatio, heightRatio);
+        canvasWidth = Math.floor(canvasWidth * scaleRatio);
+        canvasHeight = Math.floor(canvasHeight * scaleRatio);
+        lazy.logConsole.debug(
+          `Scaling UP from ${this.width}x${this.height} to ${canvasWidth}x${canvasHeight} (minimum 720p)`
+        );
+      }
+
+      // Scale DOWN if above maximum
       if (canvasWidth > maxWidth || canvasHeight > maxHeight) {
         const widthRatio = maxWidth / canvasWidth;
         const heightRatio = maxHeight / canvasHeight;
@@ -82,9 +101,13 @@ export class CastSession {
         canvasWidth = Math.floor(canvasWidth * scaleRatio);
         canvasHeight = Math.floor(canvasHeight * scaleRatio);
         lazy.logConsole.debug(
-          `Scaling down from ${this.width}x${this.height} to ${canvasWidth}x${canvasHeight}`
+          `Scaling DOWN from ${this.width}x${this.height} to ${canvasWidth}x${canvasHeight}`
         );
       }
+
+      // VP8/VP9 require even dimensions for I420 chroma subsampling
+      canvasWidth = canvasWidth & ~1;
+      canvasHeight = canvasHeight & ~1;
 
       this.canvas = this.document.createElementNS(
         "http://www.w3.org/1999/xhtml",
@@ -94,11 +117,8 @@ export class CastSession {
       this.canvas.height = canvasHeight;
       this.ctx = this.canvas.getContext("2d", {
         alpha: false,
-        willReadFrequently: false,
+        willReadFrequently: true,
       });
-
-      this.ctx.imageSmoothingEnabled = true;
-      this.ctx.imageSmoothingQuality = "high";
 
       this.fps = options.fps || 30;
       const videoBitsPerSecond = options.bitrate || 25000000;
@@ -138,7 +158,7 @@ export class CastSession {
         : `http://${this.server.getLocalIP(this.castDevice.address)}:${port}/stream.webm`;
 
       lazy.logConsole.debug(
-        `Stream URL: ${streamURL} (using ${hostname ? "system hostname" : "fallback IP"})`
+        `Stream URL: ${streamURL} (using ${hostname ? "hostname" : "IP"})`
       );
 
       const gBrowser = this.window.gBrowser;
@@ -332,8 +352,8 @@ export class CastSession {
         return;
       }
 
-      const scale =
-        browsingContext.overrideDPPX || this.window.devicePixelRatio || 1;
+      // Use 1x scale to avoid downscaling artifacts
+      const scale = 1;
 
       let scrollX = 0;
       let scrollY = 0;
@@ -366,12 +386,8 @@ export class CastSession {
           alpha: false,
           willReadFrequently: true,
         });
-        this.ctx.imageSmoothingEnabled = true;
-        this.ctx.imageSmoothingQuality = "high";
       }
 
-      this.ctx.imageSmoothingEnabled = true;
-      this.ctx.imageSmoothingQuality = "high";
       this.ctx.drawImage(snapshot, 0, 0, this.canvas.width, this.canvas.height);
       snapshot.close();
 
@@ -385,7 +401,7 @@ export class CastSession {
 
       const now = Date.now();
       const timestampMs = now - this._streamStartTime;
-      const forceKeyframe = this._frameCount % this.fps === 0;
+      const forceKeyframe = this._frameCount % (this.fps * 5) === 0;
 
       if (this._frameCount % 60 === 0) {
         lazy.logConsole.debug(

@@ -209,14 +209,48 @@ export class SimpleHTTPServer {
   }
 
   getLocalIP(castDeviceIP = null) {
-    if (!castDeviceIP) {
-      return "192.168.1.100";
+    try {
+      const dnsService = Services.dns;
+      const hostname = dnsService.myHostName;
+      if (hostname) {
+        try {
+          const record = dnsService.resolve(hostname, 0);
+          while (record.hasMore()) {
+            const ip = record.getNextAddrAsString();
+            if (ip.includes(":") || ip.startsWith("127.")) {
+              continue;
+            }
+            if (castDeviceIP) {
+              const castParts = castDeviceIP.split(".");
+              const localParts = ip.split(".");
+              if (
+                castParts.length === 4 &&
+                localParts.length === 4 &&
+                castParts[0] === localParts[0] &&
+                castParts[1] === localParts[1] &&
+                castParts[2] === localParts[2]
+              ) {
+                console.warn(`SimpleHTTPServer: Found same-subnet IP: ${ip}`);
+                return ip;
+              }
+            }
+            console.warn(`SimpleHTTPServer: Using IP: ${ip}`);
+            return ip;
+          }
+        } catch (e) {
+          console.warn("SimpleHTTPServer: DNS resolve failed:", e);
+        }
+      }
+    } catch (e) {
+      console.error("SimpleHTTPServer: Error getting local IP:", e);
     }
 
-    const parts = castDeviceIP.split(".");
-    if (parts.length === 4) {
-      const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
-      return `${subnet}.153`;
+    if (castDeviceIP) {
+      const parts = castDeviceIP.split(".");
+      if (parts.length === 4) {
+        console.warn("SimpleHTTPServer: Using fallback IP guess (may not work)");
+        return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+      }
     }
 
     return "192.168.1.100";

@@ -79,12 +79,12 @@ impl CastVideoEncoder {
             cfg.rc_target_bitrate = bitrate / 1000;
             cfg.g_error_resilient = 1;
             cfg.g_lag_in_frames = 0;
-            cfg.g_threads = 2;
+            cfg.g_threads = 4;
             cfg.rc_end_usage = VPX_VBR;
             cfg.rc_min_quantizer = 4;
             cfg.rc_max_quantizer = 48;
             cfg.kf_mode = VPX_KF_AUTO;
-            cfg.kf_max_dist = fps * 2;
+            cfg.kf_max_dist = fps * 5;
 
             let mut ctx: Box<vpx_codec_ctx> = Box::new(std::mem::zeroed());
 
@@ -101,9 +101,10 @@ impl CastVideoEncoder {
                 return Err(nserror::NS_ERROR_FAILURE);
             }
 
-            vpx_codec_control(ctx.as_mut(), VP8E_SET_CPUUSED, -5);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_CPUUSED, 4);
             vpx_codec_control(ctx.as_mut(), VP8E_SET_STATIC_THRESHOLD, 0);
             vpx_codec_control(ctx.as_mut(), VP8E_SET_TOKEN_PARTITIONS, 2);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_NOISE_SENSITIVITY, 0);
 
             let aligned = |v: u32, a: usize| -> usize {
                 let v = v as usize;
@@ -135,6 +136,29 @@ impl CastVideoEncoder {
                 return Err(nserror::NS_ERROR_OUT_OF_MEMORY);
             }
 
+            // Initialize all planes to proper "black" values to prevent artifacts
+            // Y=16 is black in limited range, U=128 and V=128 are neutral chroma
+            let actual_y_stride = img.stride[0] as usize;
+            let u_stride = img.stride[1] as usize;
+            let v_stride = img.stride[2] as usize;
+            let y_plane_size = actual_y_stride * height as usize;
+            let uv_height = ((height + 1) / 2) as usize;
+            let u_plane_size = u_stride * uv_height;
+            let v_plane_size = v_stride * uv_height;
+
+            let y_plane = std::slice::from_raw_parts_mut(img.planes[0], y_plane_size);
+            let u_plane = std::slice::from_raw_parts_mut(img.planes[1], u_plane_size);
+            let v_plane = std::slice::from_raw_parts_mut(img.planes[2], v_plane_size);
+            for byte in y_plane.iter_mut() {
+                *byte = 16; // Black in limited range Y
+            }
+            for byte in u_plane.iter_mut() {
+                *byte = 128; // Neutral chroma
+            }
+            for byte in v_plane.iter_mut() {
+                *byte = 128;
+            }
+
             let vpx_ctx = VpxContext {
                 ctx,
                 img,
@@ -146,11 +170,6 @@ impl CastVideoEncoder {
                 .map_err(|_| nserror::NS_ERROR_FAILURE)?;
 
             let header = muxer.get_header().map_err(|_| nserror::NS_ERROR_FAILURE)?;
-            eprintln!(
-                "CastVideoEncoder::init: Cached header of {} bytes",
-                header.len()
-            );
-
             state.cached_header = header;
             state.muxer = Some(muxer);
             state.width = width;
@@ -200,7 +219,6 @@ impl CastVideoEncoder {
         let width = state.width;
         let height = state.height;
         let fps = state.fps;
-        let frame_count = state.frame_count;
 
         let expected_size = (width * height * 4) as usize;
         if rgba_data.len() != expected_size {
@@ -212,15 +230,7 @@ impl CastVideoEncoder {
             return Err(nserror::NS_ERROR_INVALID_ARG);
         }
 
-        if frame_count % 60 == 0 {
-            eprintln!(
-                "CastVideoEncoder: Frame {}: timestamp_ms={}",
-                frame_count, timestamp_ms
-            );
-        }
-
-        let should_force_kf = force_keyframe || frame_count % (fps as u64 * 2) == 0;
-        let flags = if should_force_kf {
+        let flags = if force_keyframe {
             VPX_EFLAG_FORCE_KF
         } else {
             0
@@ -234,7 +244,7 @@ impl CastVideoEncoder {
             // Convert RGBA to I420 planar YUV format
             // RGBA input: [R,G,B,A,R,G,B,A,...] (4 bytes per pixel)
             // I420 output: [Y...Y, U...U, V...V] (3 planes, 1.5 bytes per pixel)
-            // This conversion is required by VP9 which operates on YUV color space
+            // This conversion is required by VP8 which operates on YUV color space
             let vpx_ctx = state.vpx_ctx.as_mut().unwrap();
             rgba_to_i420(rgba_data, width, height, &mut vpx_ctx.img)?;
         }
@@ -298,17 +308,11 @@ impl CastVideoEncoder {
         let state = self.state.borrow();
 
         if state.cached_header.is_empty() {
-            eprintln!("CastVideoEncoder::get_header: ERROR - No cached header!");
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);
         }
 
-        eprintln!(
-            "CastVideoEncoder::get_header: Returning cached header of {} bytes",
-            state.cached_header.len()
-        );
         let mut result = ThinVec::with_capacity(state.cached_header.len());
         result.extend_from_slice(&state.cached_header);
-
         Ok(result)
     }
 
@@ -407,12 +411,7 @@ impl Drop for VpxContext {
     }
 }
 
-fn rgba_to_i420(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    img: &mut vpx_image_t,
-) -> Result<(), nsresult> {
+fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) -> Result<(), nsresult> {
     unsafe {
         if img.planes[0].is_null() || img.planes[1].is_null() || img.planes[2].is_null() {
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);
@@ -420,7 +419,6 @@ fn rgba_to_i420(
 
         let y_stride = img.stride[0] as usize;
         let u_stride = img.stride[1] as usize;
-
         let y_plane_size = y_stride * height as usize;
         let uv_plane_size = u_stride * ((height + 1) / 2) as usize;
 
@@ -453,6 +451,5 @@ fn rgba_to_i420(
             }
         }
     }
-
     Ok(())
 }

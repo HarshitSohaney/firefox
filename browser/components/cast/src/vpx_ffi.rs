@@ -14,16 +14,24 @@ pub const VPX_CODEC_USE_OUTPUT_PARTITION: c_ulong = 0x20000;
 pub const VPX_CODEC_CX_FRAME_PKT: c_int = 0;
 
 pub const VPX_VBR: c_int = 0;
+pub const VPX_CBR: c_int = 1;
 pub const VPX_KF_AUTO: c_uint = 1;
 
 pub const VP8E_SET_CPUUSED: c_int = 13;
 pub const VP8E_SET_STATIC_THRESHOLD: c_int = 14;
 pub const VP8E_SET_TOKEN_PARTITIONS: c_int = 10;
+pub const VP8E_SET_NOISE_SENSITIVITY: c_int = 11;
 
 #[repr(C)]
 pub struct vpx_rational {
     pub num: c_int,
     pub den: c_int,
+}
+
+#[repr(C)]
+pub struct vpx_fixed_buf_t {
+    pub buf: *mut c_void,
+    pub sz: size_t,
 }
 
 #[repr(C)]
@@ -80,8 +88,8 @@ pub struct vpx_codec_enc_cfg_t {
     pub rc_resize_up_thresh: c_uint,
     pub rc_resize_down_thresh: c_uint,
     pub rc_end_usage: c_int,
-    pub rc_twopass_stats_in: *mut c_void,
-    pub rc_firstpass_mb_stats_in: *mut c_void,
+    pub rc_twopass_stats_in: vpx_fixed_buf_t,
+    pub rc_firstpass_mb_stats_in: vpx_fixed_buf_t,
     pub rc_target_bitrate: c_uint,
     pub rc_min_quantizer: c_uint,
     pub rc_max_quantizer: c_uint,
