@@ -47,6 +47,13 @@ export class CastSession {
     this._droppedFrames = 0;
     this._playbackStarted = false;
     this._measuredLagMs = 0;
+    this._forceKeyframe = false;
+    this._lastReceiverTime = 0;
+    this._lastReceiverUpdate = 0;
+    this._receiverBuffering = false;
+    this._lastEncodedTimestamp = 0;
+    this._playbackStartedTime = 0;
+    this._initialLagMs = 0;
   }
 
   /**
@@ -121,10 +128,10 @@ export class CastSession {
       });
 
       this.fps = options.fps || 60;
-      const videoBitsPerSecond = options.bitrate || 25000000;
+      this.bitrate = options.bitrate || 25000000;
 
       lazy.logConsole.debug(
-        `Canvas ${canvasWidth}x${canvasHeight} @ ${this.fps}fps, ${Math.floor(videoBitsPerSecond / 1000)}kbps`
+        `Canvas ${canvasWidth}x${canvasHeight} @ ${this.fps}fps, ${Math.floor(this.bitrate / 1000)}kbps`
       );
 
       this._encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
@@ -133,7 +140,7 @@ export class CastSession {
       this._encoder.init(
         canvasWidth,
         canvasHeight,
-        videoBitsPerSecond,
+        this.bitrate,
         this.fps
       );
 
@@ -326,19 +333,55 @@ export class CastSession {
   }
 
   onPlaybackStarted(castCurrentTime) {
+    this._lastReceiverTime = castCurrentTime;
+    this._lastReceiverUpdate = Date.now();
+
     if (this._playbackStarted) {
       return;
     }
 
     this._playbackStarted = true;
+    this._playbackStartedTime = Date.now();
     const streamElapsedSec = (Date.now() - this._streamStartTime) / 1000;
     const lagSec = streamElapsedSec - castCurrentTime;
-    this._measuredLagMs = lagSec * 1000;
 
     lazy.logConsole.debug(
       `Cast PLAYING: currentTime=${castCurrentTime.toFixed(2)}s, ` +
-        `stream=${streamElapsedSec.toFixed(2)}s, lag=${lagSec.toFixed(2)}s`
+        `stream=${streamElapsedSec.toFixed(2)}s, startup lag=${lagSec.toFixed(2)}s`
     );
+
+    // If we have significant startup lag, reinitialize the encoder
+    // This creates a timestamp discontinuity that should make the receiver skip ahead
+    if (lagSec > 1 && this._encoder) {
+      lazy.logConsole.debug(
+        `Reinitializing encoder to skip ${lagSec.toFixed(1)}s startup lag`
+      );
+      this._encoder.init(
+        this.canvas.width,
+        this.canvas.height,
+        this.bitrate,
+        this.fps
+      );
+      this._streamStartTime = Date.now();
+      this._lastEncodedTimestamp = 0;
+      this._forceKeyframe = true;
+    }
+
+    this._measuredLagMs = 0;
+    this._initialLagMs = 0;
+  }
+
+  updateReceiverTime(castCurrentTime) {
+    this._lastReceiverTime = castCurrentTime;
+    this._lastReceiverUpdate = Date.now();
+  }
+
+  getEstimatedReceiverTime() {
+    if (!this._lastReceiverUpdate) {
+      return 0;
+    }
+    const elapsed = (Date.now() - this._lastReceiverUpdate) / 1000;
+    return this._lastReceiverTime + elapsed;
   }
 
   getMeasuredLag() {
@@ -352,6 +395,39 @@ export class CastSession {
 
     if (this.isCapturing) {
       return;
+    }
+
+    // Lag reduction: if lag has grown too much, resync by adjusting our clock to receiver's position
+    // This effectively "skips" the accumulated lag and starts fresh
+    const gracePeriodMs = 4000;
+    const maxLagGrowthMs = 1000;
+    if (
+      this._playbackStartedTime &&
+      Date.now() - this._playbackStartedTime > gracePeriodMs &&
+      this._lastReceiverUpdate &&
+      this._initialLagMs !== undefined
+    ) {
+      const receiverTimeMs = this.getEstimatedReceiverTime() * 1000;
+      const currentLagMs = (Date.now() - this._streamStartTime) - receiverTimeMs;
+      const lagGrowthMs = currentLagMs - this._initialLagMs;
+
+      if (lagGrowthMs > maxLagGrowthMs) {
+        // Hard reset: reinitialize encoder to reset timestamp state
+        // This allows timestamps to start fresh from 0
+        lazy.logConsole.debug(
+          `Lag grew by ${lagGrowthMs.toFixed(0)}ms - reinitializing encoder to catch up`
+        );
+
+        // Reinitialize encoder (clears internal timestamp tracking)
+        this._encoder.init(this.canvas.width, this.canvas.height, this.bitrate, this.fps);
+
+        // Reset our timestamp tracking to start fresh
+        this._streamStartTime = Date.now();
+        this._lastEncodedTimestamp = 0;
+        this._initialLagMs = 0;
+        this._forceKeyframe = true;
+        this._playbackStartedTime = Date.now(); // Reset grace period
+      }
     }
 
     this.isCapturing = true;
@@ -393,8 +469,17 @@ export class CastSession {
       const rgbaData = new Uint8Array(imageData.data.buffer);
 
       const now = Date.now();
-      const timestampMs = now - this._streamStartTime;
-      const forceKeyframe = this._frameCount % (this.fps * 5) === 0;
+      let timestampMs = now - this._streamStartTime;
+
+      // VP8 encoder requires monotonically increasing timestamps
+      if (timestampMs <= this._lastEncodedTimestamp) {
+        timestampMs = this._lastEncodedTimestamp + 1;
+      }
+      this._lastEncodedTimestamp = timestampMs;
+
+      const forceKeyframe =
+        this._forceKeyframe || this._frameCount % (this.fps * 5) === 0;
+      this._forceKeyframe = false;
 
       if (this._frameCount % 60 === 0) {
         lazy.logConsole.debug(
@@ -409,18 +494,11 @@ export class CastSession {
       );
 
       if (this.streamConnection && webmCluster && webmCluster.length) {
-        // Drop frames if too many are pending to prevent unbounded lag
         if (this._pendingFrames > 60) {
           this._droppedFrames++;
           if (this._droppedFrames % 30 === 1) {
             lazy.logConsole.warn(
-              `Dropped ${this._droppedFrames} frames, pending: ${this._pendingFrames}. Resyncing timestamps...`
-            );
-            // Reset stream clock to recover from lag
-            const lagMs = this._pendingFrames * (1000 / this.fps);
-            this._streamStartTime = Date.now() - 100;
-            lazy.logConsole.debug(
-              `Reset stream clock, was ${lagMs}ms behind, now ~100ms`
+              `Dropped ${this._droppedFrames} frames, pending: ${this._pendingFrames}`
             );
           }
         } else {
@@ -484,6 +562,13 @@ export class CastSession {
     this._streamStartTime = null;
     this._playbackStarted = false;
     this._measuredLagMs = 0;
+    this._forceKeyframe = false;
+    this._lastReceiverTime = 0;
+    this._lastReceiverUpdate = 0;
+    this._receiverBuffering = false;
+    this._lastEncodedTimestamp = 0;
+    this._playbackStartedTime = 0;
+    this._initialLagMs = 0;
 
     if (this.tabCloseListener) {
       try {
@@ -530,18 +615,26 @@ export class CastSession {
 
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
+        lazy.logConsole.debug(
+          `MEDIA_STATUS: playerState=${status?.playerState}, currentTime=${status?.currentTime?.toFixed(2)}`
+        );
 
         if (status?.idleReason === "ERROR") {
           lazy.logConsole.error("Media playback error");
           this.setState("error");
         }
 
-        if (
-          status?.playerState === "PLAYING" &&
-          !this._playbackStarted &&
-          this._streamStartTime
-        ) {
-          this.onPlaybackStarted(status.currentTime || 0);
+        if (status?.playerState === "BUFFERING") {
+          this._receiverBuffering = true;
+        } else if (status?.playerState === "PLAYING") {
+          this._receiverBuffering = false;
+          if (this._streamStartTime) {
+            if (!this._playbackStarted) {
+              this.onPlaybackStarted(status.currentTime || 0);
+            } else {
+              this.updateReceiverTime(status.currentTime || 0);
+            }
+          }
         }
       } else if (message.type === "LOAD_FAILED") {
         lazy.logConsole.error("LOAD_FAILED:", message);

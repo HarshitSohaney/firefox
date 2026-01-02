@@ -109,15 +109,27 @@ var CastPanel = {
   },
 
   addDeviceItem(device) {
+    const state = gCastService.state;
+    const isActive = state.activeDeviceId === device.id;
+
     const item = document.createXULElement("richlistitem");
     item.setAttribute("deviceId", device.id);
     item.className = "cast-device-item";
+    if (isActive) {
+      item.classList.add("casting");
+    }
 
     const label = document.createXULElement("label");
     label.textContent = device.friendlyName || device.address || device.id;
     label.className = "cast-device-name";
-
     item.appendChild(label);
+
+    if (isActive) {
+      const statusLabel = document.createXULElement("label");
+      statusLabel.textContent = "Casting";
+      statusLabel.className = "cast-device-status";
+      item.appendChild(statusLabel);
+    }
 
     item.addEventListener("command", () => this.onDeviceSelected(device.id));
     item.addEventListener("click", () => this.onDeviceSelected(device.id));
@@ -150,7 +162,7 @@ var CastPanel = {
   },
 
   async onManualAdd() {
-    const deviceIP = prompt("Enter Cast device IP address:", "192.168.1.100");
+    const deviceIP = prompt("Enter Cast device IP address:", "1.1.1.1");
 
     if (!deviceIP) {
       return;
@@ -216,7 +228,13 @@ var CastPanel = {
 
     if (isActive) {
       this.activeSession.hidden = false;
-      this.castingLabel.textContent = "Casting to device...";
+      const activeDevice = gCastService.getActiveDevice();
+      if (activeDevice) {
+        const deviceName = activeDevice.friendlyName || activeDevice.address;
+        this.castingLabel.textContent = `Casting to ${deviceName}`;
+      } else {
+        this.castingLabel.textContent = "Casting...";
+      }
     } else {
       this.activeSession.hidden = true;
     }

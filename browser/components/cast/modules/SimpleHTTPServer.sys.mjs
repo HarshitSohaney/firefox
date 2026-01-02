@@ -253,6 +253,6 @@ export class SimpleHTTPServer {
       }
     }
 
-    return "192.168.1.100";
+    return "200.0.0.1";
   }
 }

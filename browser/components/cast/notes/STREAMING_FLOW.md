@@ -7,8 +7,7 @@ This document provides a detailed, step-by-step explanation of how Firefox Cast 
 - [Overview](#overview)
 - [Phase 1: Setup & Connection](#phase-1-setup--connection)
 - [Phase 2: Encoder Preparation](#phase-2-encoder-preparation)
-- [Phase 3: Stream Synchronization](#phase-3-stream-synchronization)
-- [Phase 4: Continuous Encoding Loop](#phase-4-continuous-encoding-loop)
+- [Phase 3: Continuous Encoding Loop](#phase-3-continuous-encoding-loop)
 - [Timeline Diagram](#timeline-diagram)
 - [Data Flow](#data-flow)
 
@@ -16,14 +15,13 @@ This document provides a detailed, step-by-step explanation of how Firefox Cast 
 
 ## Overview
 
-The Cast streaming system consists of 4 distinct phases:
+The Cast streaming system consists of 3 distinct phases:
 
 1. **Setup & Connection** - Establish Cast protocol connection
 2. **Encoder Preparation** - Initialize VP8 encoder and HTTP server
-3. **Stream Synchronization** - Wait for Cast device to connect
-4. **Continuous Encoding** - Capture, encode, and stream frames
+3. **Continuous Encoding** - Capture, encode, and stream frames
 
-**Key Insight:** Encoding only starts when BOTH conditions are met: (1) Cast device acknowledges LOAD via MEDIA_STATUS, AND (2) Cast device connects to HTTP stream. This prevents accumulated buffer lag while avoiding chicken-and-egg deadlock.
+**Key Insight:** Encoding starts immediately when the Cast device connects to the HTTP stream. The system uses real timestamps based on when encoding started, allowing the Cast device to buffer appropriately.
 
 ---
 
@@ -31,23 +29,23 @@ The Cast streaming system consists of 4 distinct phases:
 
 ### Step 1.1: User Initiates Cast
 
-**File:** `browser/components/cast/content/browser-cast.js:28-62`
+**File:** `browser/components/cast/content/browser-cast.js:152-180`
 
 ```javascript
 User clicks Cast icon
   ↓
-gCastUI.openPanel()
+CastPanel.onManualAdd()
   ↓
-prompt("Enter Cast device IP address:")
+prompt("Enter Cast device IP address:", "192.168.1.100")
   ↓
 User enters IP (e.g., "192.168.1.171")
 ```
 
 **User sees:** Input dialog requesting Cast device IP address.
 
-### Step 1.2: Add Device (Certificate Validation)
+### Step 1.2: Add Device (Certificate Exception)
 
-**File:** `browser/components/cast/CastService.sys.mjs:121-162`
+**File:** `browser/components/cast/CastService.sys.mjs:148-186`
 
 ```javascript
 await castService.addManualDevice("192.168.1.171", 8009)
@@ -58,36 +56,36 @@ await castService.addManualDevice("192.168.1.171", 8009)
 1. Create `CastDevice` object (JavaScript wrapper)
 2. Call `device.addCertificateOverride()`
    - Makes HTTPS request to `https://192.168.1.171:8009/`
-   - Retrieves self-signed certificate
+   - Retrieves self-signed certificate from TLS handshake
    - Validates certificate is self-signed (issuer === subject)
-   - Adds exception to Firefox's certificate override service
+   - Adds exception via `rememberValidityOverride()` so Firefox trusts the device
 3. **No Cast protocol connection yet** - only certificate preparation
 
-**File:** `browser/components/cast/modules/CastDevice.sys.mjs:82-136`
+**File:** `browser/components/cast/modules/CastDevice.sys.mjs:223-295`
 
-**Important:** This step just validates SSL/TLS will work. The actual Cast connection happens next.
+**Important:** This step validates SSL/TLS will work. The actual Cast connection happens next.
 
 ### Step 1.3: Establish Cast Protocol Connection
 
-**File:** `browser/components/cast/content/browser-cast.js:65-81`
+**File:** `browser/components/cast/content/browser-cast.js:163-171`
 
 ```javascript
-await castService.testConnection(deviceId)
+await gCastService.testConnection(device.id)
   ↓
 await device.connect()  // ← ACTUAL CAST CONNECTION
 ```
 
-**File:** `browser/components/cast/modules/CastDevice.sys.mjs:88-103`
+**File:** `browser/components/cast/modules/CastDevice.sys.mjs:231-254`
 
 This calls into Rust XPCOM component:
 
-**File:** `browser/components/cast/src/cast_device.rs:86-199`
+**File:** `browser/components/cast/src/cast_device.rs:133-259`
 
 **Detailed steps:**
 
 ```rust
 // 1. Create TLS socket transport
-let sts_service = SocketTransport::service::<nsISocketTransportService>()?;
+let sts_service = xpcom::components::SocketTransport::service()?;
 let transport = sts_service.CreateTransport(["ssl"], address, port)?;
 
 // 2. Open output stream (for sending messages)
@@ -111,11 +109,11 @@ let connect_payload = ConnectionHandler::create_connect_message();
 self.send_message_internal("urn:x-cast:com.google.cast.tp.connection", &connect_payload)?;
 
 // 8. Request receiver status
-let get_status = json!({"type": "GET_STATUS", "requestId": 1}).to_string();
+let get_status = receiver_handler.create_get_status();
 self.send_message_internal("urn:x-cast:com.google.cast.receiver", &get_status)?;
 
 // 9. Notify JavaScript layer
-self.notify_state_change("connected");
+self.notify_state_change(DeviceState::Connected);
 ```
 
 **Console output:**
@@ -147,31 +145,46 @@ CastDevice: Connected successfully
 
 ### Step 2.1: Start Tab Casting
 
-**File:** `browser/components/cast/content/browser-cast.js:120-143`
+**File:** `browser/components/cast/content/browser-cast.js:167-171`
 
 ```javascript
-await castService.startTabCasting(deviceId, browser, window, {
-  fps: 24,
-  bitrate: 4000000  // 4 Mbps
+await gCastService.startTabCasting(device.id, browser, window, {
+  fps: 30,
+  bitrate: 15000000  // 15 Mbps
 })
 ```
 
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:44-161`
+**File:** `browser/components/cast/modules/CastSession.sys.mjs:62-214`
 
 ### Step 2.2: Calculate Canvas Dimensions
 
-**Lines 56-73:**
+**Lines 74-114:**
 
 ```javascript
 // Get browser dimensions
 this.width = browser.clientWidth || 1280;
 this.height = browser.clientHeight || 720;
 
-// Enforce maximum dimensions
-const maxWidth = 1280;
-const maxHeight = 720;
+// Minimum dimensions (ensures at least 720p quality)
+const minWidth = 1280;
+const minHeight = 720;
+// Maximum dimensions
+const maxWidth = 1920;
+const maxHeight = 1080;
 
-// Scale down if necessary (maintain aspect ratio)
+let canvasWidth = this.width;
+let canvasHeight = this.height;
+
+// Scale UP if below minimum
+if (canvasWidth < minWidth || canvasHeight < minHeight) {
+  const widthRatio = minWidth / canvasWidth;
+  const heightRatio = minHeight / canvasHeight;
+  const scaleRatio = Math.max(widthRatio, heightRatio);
+  canvasWidth = Math.floor(canvasWidth * scaleRatio);
+  canvasHeight = Math.floor(canvasHeight * scaleRatio);
+}
+
+// Scale DOWN if above maximum
 if (canvasWidth > maxWidth || canvasHeight > maxHeight) {
   const widthRatio = maxWidth / canvasWidth;
   const heightRatio = maxHeight / canvasHeight;
@@ -179,36 +192,41 @@ if (canvasWidth > maxWidth || canvasHeight > maxHeight) {
   canvasWidth = Math.floor(canvasWidth * scaleRatio);
   canvasHeight = Math.floor(canvasHeight * scaleRatio);
 }
+
+// VP8 requires even dimensions for I420 chroma subsampling
+canvasWidth = canvasWidth & ~1;
+canvasHeight = canvasHeight & ~1;
 ```
 
 **Example:**
-- Browser: 1920x1080 → Scaled to: 1280x720
-- Browser: 800x600 → No scaling: 800x600
+- Browser: 800x600 → Scaled UP to: 1280x960 (minimum 720p)
+- Browser: 1920x1080 → No scaling: 1920x1080
+- Browser: 2560x1440 → Scaled DOWN to: 1920x1080
 
 ### Step 2.3: Create Canvas
 
-**Lines 75-84:**
+**Lines 116-125:**
 
 ```javascript
 this.canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
-this.canvas.width = canvasWidth;   // e.g., 1280
-this.canvas.height = canvasHeight; // e.g., 720
+this.canvas.width = canvasWidth;
+this.canvas.height = canvasHeight;
 
 this.ctx = this.canvas.getContext("2d", {
   alpha: false,           // No transparency
-  willReadFrequently: false
+  willReadFrequently: true  // We read pixels every frame
 });
 ```
 
-**Purpose:** Canvas is used temporarily for getting RGBA pixel data from snapshots.
+**Purpose:** Canvas is used for getting RGBA pixel data from snapshots.
 
 ### Step 2.4: Initialize Rust VP8 Encoder
 
-**Lines 86-104:**
+**Lines 134-142:**
 
 ```javascript
-this.fps = 24;
-const videoBitsPerSecond = 4000000;  // 4 Mbps
+this.fps = options.fps || 60;
+const videoBitsPerSecond = options.bitrate || 25000000;  // 25 Mbps default
 
 // Create Rust XPCOM component
 this._encoder = Cc["@mozilla.org/cast/video-encoder;1"]
@@ -218,7 +236,7 @@ this._encoder = Cc["@mozilla.org/cast/video-encoder;1"]
 this._encoder.init(canvasWidth, canvasHeight, videoBitsPerSecond, this.fps);
 ```
 
-**This calls Rust:** `browser/components/cast/src/video_encoder.rs:46-131`
+**This calls Rust:** `browser/components/cast/src/video_encoder.rs:54-181`
 
 **What happens in Rust:**
 
@@ -235,14 +253,24 @@ cfg.g_w = 1280;              // Width
 cfg.g_h = 720;               // Height
 cfg.g_timebase.num = 1;      // Timebase numerator
 cfg.g_timebase.den = 1000;   // Timebase denominator (1ms precision)
-cfg.rc_target_bitrate = 4000; // 4000 kbps (converted from bps)
+cfg.rc_target_bitrate = 15000; // kbps (converted from bps)
 cfg.g_error_resilient = 1;   // Enable error resilience
 cfg.g_lag_in_frames = 0;     // No frame delay (real-time)
-cfg.g_threads = 2;           // Use 2 threads
+cfg.g_threads = 4;           // Use 4 threads
+cfg.rc_end_usage = VPX_VBR;  // Variable bitrate
+cfg.rc_min_quantizer = 4;    // Quality range
+cfg.rc_max_quantizer = 48;
+cfg.kf_mode = VPX_KF_AUTO;   // Auto keyframes
+cfg.kf_max_dist = fps * 5;   // Max keyframe interval (5 seconds)
 
 // Initialize VP8 encoder context
 let mut ctx: vpx_codec_ctx = zeroed();
 vpx_codec_enc_init_ver(&mut ctx, iface, &cfg, 0, VPX_ENCODER_ABI_VERSION);
+
+// Encoder tuning for real-time performance
+vpx_codec_control(ctx, VP8E_SET_CPUUSED, 4);
+vpx_codec_control(ctx, VP8E_SET_STATIC_THRESHOLD, 0);
+vpx_codec_control(ctx, VP8E_SET_TOKEN_PARTITIONS, 2);
 
 // Create I420 image buffer (YUV 4:2:0 format)
 let y_stride = align(width, 32);  // Align to 32 bytes
@@ -259,19 +287,20 @@ let muxer = WebMWriter::new(width, height)?;
 
 **Console output:**
 ```
-CastVideoEncoder::init: Initialized VP8 encoder (1280x720, 4000kbps, 24fps)
+Canvas 1280x720 @ 30fps, 15000kbps
+Rust encoder initialized, WebM header: 127 bytes
 ```
 
 ### Step 2.5: Get WebM Header
 
-**Lines 98-104:**
+**Lines 144:**
 
 ```javascript
 this._webmHeader = this._encoder.getHeader();
 // Returns: Array of bytes (~127 bytes)
 ```
 
-**File:** `browser/components/cast/src/video_encoder.rs:221-235`
+**File:** `browser/components/cast/src/video_encoder.rs:306-317`
 
 **What's in the header:**
 
@@ -303,7 +332,7 @@ this._webmHeader = this._encoder.getHeader();
 
 ### Step 2.6: Start HTTP Server
 
-**Lines 106-133:**
+**Lines 153-166:**
 
 ```javascript
 this.server = new SimpleHTTPServer();
@@ -323,29 +352,43 @@ const streamURL = hostname
 ```
 
 **Example URLs:**
-- `http://Harshits-MacBook.local:8010/stream.webm` (using mDNS hostname)
-- `http://192.168.1.123:8010/stream.webm` (using IP address)
+- `http://Harshits-MacBook.local:8010/stream.webm` (using mDNS hostname - Cast device multicasts query to all local devices)
+- `http://192.168.1.123:8010/stream.webm` (using IP address - no DNS/mDNS lookup needed)
 
 **Console output:**
 ```
-Stream URL: http://192.168.1.123:8010/stream.webm (using fallback IP)
+Stream URL: http://192.168.1.123:8010/stream.webm (using IP)
 ```
+
+**How mDNS works (for .local hostnames):**
+When the Cast device receives a URL with a `.local` hostname:
+1. Cast device sends mDNS query to multicast address `224.0.0.251` (IPv4) or `ff02::fb` (IPv6) on port 5353
+2. The multicast packet is delivered by the network switch/WiFi access point to ALL devices on the local network
+3. The device that owns that hostname (Firefox host) receives the query and responds directly with its IP address
+4. No router DNS lookup or central server involved - it's direct peer-to-peer communication
 
 **Important:** Server is now listening, but NO encoding is happening yet!
 
 ### Step 2.7: Tell Cast Device to Load Stream
 
-**Lines 139-147:**
+**Lines 178-196:**
 
 ```javascript
-this.mediaHandler = new CastMediaHandler(this.castDevice);
+this.mediaHandler = new lazy.CastMediaHandler(this.castDevice);
+
+// Listen for media status messages
+this.castDevice.addEventListener("message", ({ namespace, payload }) => {
+  if (namespace === lazy.CastMediaHandler.NAMESPACE) {
+    this.handleMediaMessage(JSON.stringify(payload));
+  }
+});
 
 const metadata = {
   metadataType: 0,
   title: "Firefox Tab Cast",
 };
 
-await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
+await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata, true);
 ```
 
 **File:** `browser/components/cast/modules/CastMediaHandler.sys.mjs`
@@ -355,54 +398,40 @@ await this.mediaHandler.load(streamURL, "video/webm", "LIVE", metadata);
 ```json
 {
   "type": "LOAD",
-  "requestId": 1234567890,
+  "requestId": 1,
   "media": {
     "contentId": "http://192.168.1.123:8010/stream.webm",
     "contentType": "video/webm",
     "streamType": "LIVE",
+    "duration": -1,
     "metadata": {
       "metadataType": 0,
       "title": "Firefox Tab Cast"
     }
   },
-  "autoplay": true,
-  "currentTime": 0
+  "autoplay": true
 }
 ```
 
 **Sent to:** `urn:x-cast:com.google.cast.media` namespace
 
-**Cast device response:**
-```json
-{
-  "type": "MEDIA_STATUS",
-  "status": [{
-    "mediaSessionId": 1,
-    "media": { ... },
-    "playerState": "BUFFERING",
-    "currentTime": 0
-  }]
-}
-```
-
 **Console output:**
 ```
-Waiting for Cast device to connect to stream before encoding...
+Media LOAD sent to Cast device. Waiting for MEDIA_STATUS response...
 ```
 
 **Critical:** At this point:
-- ✅ Encoder initialized
-- ✅ HTTP server running
-- ✅ Cast device knows the URL
-- ❌ NOT encoding yet
-- ❌ No frames being captured
-- ⏳ Waiting for Cast device to connect...
+- Encoder initialized
+- HTTP server running
+- Cast device knows the URL
+- NOT encoding yet
+- Waiting for Cast device to connect to HTTP stream...
 
 ---
 
-## Phase 3: Stream Synchronization
+## Phase 3: Continuous Encoding Loop
 
-### Step 3.1: Cast Device Processes LOAD Command
+### Step 3.1: Cast Device Connects to HTTP Stream
 
 **Timeline:**
 
@@ -410,17 +439,19 @@ Waiting for Cast device to connect to stream before encoding...
 T+0ms:    Cast device receives LOAD message
 T+500ms:  Cast device initializes media player
 T+1000ms: Cast device prepares network stack
-T+2000ms: Cast device resolves hostname (if using mDNS)
+T+2000ms: Cast device resolves hostname (if using .local domain)
+           - Multicasts mDNS query to 224.0.0.251 (all local devices)
+           - Firefox host responds directly with its IP
 T+5000ms: Cast device makes HTTP GET request
 ```
 
 **Why the delay?**
 - Media player initialization
-- DNS/mDNS resolution
+- mDNS resolution (multicast query to all local devices, no router/DNS server involved)
 - Buffer allocation
 - UI updates on Cast device
 
-### Step 3.2: Cast Device Makes HTTP Request
+### Step 3.2: Handle Stream Request
 
 **HTTP request from Cast device:**
 
@@ -435,14 +466,12 @@ Connection: keep-alive
 
 **This triggers:** `handleStreamRequest(connection)`
 
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:163-209`
+**File:** `browser/components/cast/modules/CastSession.sys.mjs:222-263`
 
-### Step 3.3: Send HTTP Response
-
-**Lines 165-181:**
+**Lines 229-243:**
 
 ```javascript
-lazy.logConsole.debug("Cast device connected to stream! Starting encoding now...");
+lazy.logConsole.debug(`Cast device connected to stream at ${Date.now()}`);
 
 const headers =
   "HTTP/1.1 200 OK\r\n" +
@@ -467,12 +496,12 @@ connection.outputStream.write(headers, headers.length);
 - `Transfer-Encoding: chunked` - Indefinite length stream
 - `CORS headers` - Allow cross-origin access
 
-### Step 3.4: Send WebM Header Immediately
+### Step 3.3: Send WebM Header
 
-**Lines 183-186:**
+**Lines 245-250:**
 
 ```javascript
-if (this._webmHeader && this._webmHeader.length > 0) {
+if (this._webmHeader && this._webmHeader.length) {
   lazy.logConsole.debug(`Sending WebM header: ${this._webmHeader.length} bytes`);
   this.writeChunk(connection.outputStream, this._webmHeader);
 }
@@ -491,99 +520,31 @@ if (this._webmHeader && this._webmHeader.length > 0) {
 - `[127 bytes]` = Actual WebM header data
 - `\r\n` = CRLF (chunk terminator)
 
-**What Cast device gets:**
-```
-HTTP/1.1 200 OK
-Content-Type: video/webm
-...
+### Step 3.4: Start Capture Loop Immediately
 
-7f
-[EBML header + Segment Info + Track metadata]
+**Lines 252-256:**
 
-← Stream continues with frame data...
-```
-
-**Console output:**
-```
-Cast device connected to stream! Starting encoding now...
-Sending WebM header: 127 bytes
-```
-
-### Step 3.5: Synchronization Wait - Two Conditions Required
-
-**Critical synchronization:** Encoding only starts when BOTH conditions are met:
-
-1. **MEDIA_STATUS received** from Cast device (confirms LOAD acknowledged)
-2. **HTTP stream connection** established (Cast device connected to our server)
-
-**Why this approach?**
-- Starting too early → Pre-buffered frames cause lag
-- Waiting for PLAYING → Chicken-and-egg problem (needs frames to start playing)
-- **Solution:** Wait for MEDIA_STATUS acknowledgment, THEN start encoding
-
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:166-208`
-
-#### Case A: MEDIA_STATUS Arrives First (Typical Flow)
-
-**Timeline:**
-```
-T+0ms:    LOAD sent to Cast device
-T+100ms:  MEDIA_STATUS received (playerState: IDLE/LOADING)
-          → Set _receivedMediaStatus = true
-T+5000ms: Cast device connects to HTTP stream
-          → Check: _receivedMediaStatus == true? YES
-          → Start encoding immediately!
-```
-
-**Code in handleStreamRequest():**
 ```javascript
-if (this._receivedMediaStatus) {
-  lazy.logConsole.debug("Media status already received, starting encoding now");
-  this.startCaptureLoop();
-} else {
-  lazy.logConsole.debug("Waiting for first MEDIA_STATUS before starting encoding...");
-  this._pendingStreamConnection = true;
-}
+this.streamConnection = connection;
+this._frameCount = 0;
+
+lazy.logConsole.debug("Cast device connected, starting capture immediately");
+this.startCaptureLoop();
 ```
 
-#### Case B: Stream Connection Arrives First (Race Condition)
-
-**Timeline:**
-```
-T+0ms:    LOAD sent to Cast device
-T+100ms:  Cast device connects to HTTP stream (fast network)
-          → Set _pendingStreamConnection = true
-          → Wait...
-T+200ms:  MEDIA_STATUS received
-          → Check: _pendingStreamConnection == true? YES
-          → Start encoding now!
-```
-
-**Code in handleMediaMessage():**
-```javascript
-if (!this._receivedMediaStatus) {
-  this._receivedMediaStatus = true;
-  lazy.logConsole.debug("Received first MEDIA_STATUS");
-
-  if (this._pendingStreamConnection && this.streamConnection) {
-    lazy.logConsole.debug("Stream connection is ready, starting encoding now");
-    this._pendingStreamConnection = false;
-    this.startCaptureLoop();
-  }
-}
-```
-
-### Step 3.6: Start Capture Loop (When Both Conditions Met)
-
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:227-252`
+**File:** `browser/components/cast/modules/CastSession.sys.mjs:292-330`
 
 ```javascript
 startCaptureLoop() {
+  if (this._encodingStarted) {
+    return;
+  }
+
   this._encodingStarted = true;
   this._streamStartTime = Date.now();
   this._nextFrameTime = this._streamStartTime;
 
-  const intervalMs = 1000 / this.fps;  // 24 FPS = 41.666ms
+  const intervalMs = 1000 / this.fps;  // 30 FPS = 33.33ms
 
   const captureLoop = async () => {
     if (!this._encodingStarted || !this.canvas) {
@@ -608,39 +569,25 @@ startCaptureLoop() {
 
 **Console output:**
 ```
+Cast device connected to stream at 1766430166792
 Both stream connection and MEDIA_STATUS ready! Starting capture at: 1766430166792
-Started capture loop at 24 FPS (interval: 41.666666666666664ms)
+Started capture loop at 30 FPS (interval: 33.333ms)
 ```
 
-**Key improvements:**
+**Key features:**
 - `requestAnimationFrame` instead of `setInterval` (better timing precision)
 - Scheduled frame timing with `_nextFrameTime` accumulator (prevents drift)
-- Real timestamps from `_streamStartTime` (not synthetic)
+- Real timestamps from `Date.now() - _streamStartTime`
 - Defensive checks prevent race condition with cleanup
 
-**Timeline from this moment:**
-```
-T+5100ms: Both conditions met → startCaptureLoop() called
-T+5100ms: Frame 0 captured (timestamp: 0ms)
-T+5142ms: Frame 1 captured (timestamp: 42ms)
-T+5183ms: Frame 2 captured (timestamp: 83ms)
-...every ~42ms at precise intervals...
-```
+### Step 3.5: Capture Frame Overview
 
----
-
-## Phase 4: Continuous Encoding Loop
-
-### Step 4.1: Capture Frame Overview
-
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:228-303`
+**File:** `browser/components/cast/modules/CastSession.sys.mjs:377-486`
 
 **High-level flow:**
 
 ```
-captureFrame() called every ~42ms
-  ↓
-Get scroll position from content process
+captureFrame() called every ~33ms
   ↓
 Take snapshot of browser content
   ↓
@@ -648,7 +595,7 @@ Draw snapshot to canvas
   ↓
 Get RGBA pixel data from canvas
   ↓
-Call Rust encoder with RGBA data
+Call Rust encoder with RGBA data and real timestamp
   ↓
 Rust: Convert RGBA → I420 (YUV)
   ↓
@@ -661,9 +608,9 @@ Write WebM cluster to HTTP stream
 Cast device receives and decodes
 ```
 
-### Step 4.2: Guard Against Concurrent Captures
+### Step 3.6: Guard Against Concurrent Captures
 
-**Lines 229-237:**
+**Lines 377-388:**
 
 ```javascript
 async captureFrame() {
@@ -675,62 +622,40 @@ async captureFrame() {
     return;  // Already capturing, skip this tick
   }
 
+  // Skip frames if receiver is buffering
+  if (this._playbackStarted && this._receiverBuffering) {
+    return;
+  }
+
   this.isCapturing = true;
 ```
 
 **Why needed?**
 - Capture is async (uses `await`)
-- If frame capture takes > 42ms, next interval fires
+- If frame capture takes > 33ms, next interval fires
 - This prevents multiple captures running simultaneously
 
-### Step 4.3: Get Scroll Position
+### Step 3.7: Take Snapshot
 
-**Lines 240-262:**
+**Lines 410-426:**
 
 ```javascript
 const browsingContext = this.browser.browsingContext;
-const scale = browsingContext.overrideDPPX || this.window.devicePixelRatio || 1;
-
-let scrollX = 0, scrollY = 0;
-
-try {
-  // Get actor in content process
-  const actor = this.browser.browsingContext.currentWindowGlobal.getActor("CastTab");
-
-  // Ask content process for viewport position
-  const viewportInfo = await actor.getViewportInfo();
-  if (viewportInfo) {
-    scrollX = viewportInfo.scrollX || 0;
-    scrollY = viewportInfo.scrollY || 0;
-  }
-} catch (e) {
-  lazy.logConsole.error("Failed to get viewport info:", e);
+if (!browsingContext) {
+  this.isCapturing = false;
+  return;
 }
-```
 
-**File:** `browser/components/cast/actors/CastTabChild.sys.mjs`
-
-**Why get scroll position?**
-- Browser content might be scrolled
-- We want to capture the visible viewport, not top-left of page
-- Content process knows exact scroll position
-
-**Example:**
-- User scrolled to middle of long page
-- scrollX = 0, scrollY = 2000
-- We capture from (0, 2000) to (1280, 2720)
-
-### Step 4.4: Take Snapshot
-
-**Lines 264-269:**
-
-```javascript
-const rect = new DOMRect(scrollX, scrollY, this.width, this.height);
+const scale = 1;
+const flags =
+  browsingContext.currentWindowGlobal.DRAWSNAPSHOT_DRAW_CARET |
+  browsingContext.currentWindowGlobal.DRAWSNAPSHOT_USE_WIDGET_LAYERS;
 
 const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
-  rect,
+  null,   // null = capture entire visible viewport
   scale,
-  "rgb(255, 255, 255)"  // White background color
+  "rgb(255, 255, 255)",  // White background color
+  flags
 );
 ```
 
@@ -741,15 +666,16 @@ const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
 - Very fast (hardware-accelerated)
 
 **Parameters:**
-- `rect` - Area to capture (x, y, width, height)
-- `scale` - Device pixel ratio (e.g., 2.0 for Retina displays)
+- `rect` - Area to capture (null = entire viewport)
+- `scale` - Device pixel ratio (1.0)
 - `backgroundColor` - Used for transparency
+- `flags` - DRAW_CARET shows cursor, USE_WIDGET_LAYERS uses composited layers
 
 **Result:** `ImageBitmap` object (GPU memory, not accessible to JS directly)
 
-### Step 4.5: Draw to Canvas
+### Step 3.8: Draw to Canvas
 
-**Lines 271-279:**
+**Lines 428-436:**
 
 ```javascript
 if (!this.ctx) {
@@ -771,9 +697,9 @@ snapshot.close();  // Release GPU memory immediately
 
 **Canvas now contains:** RGBA pixels of current browser view
 
-### Step 4.6: Get RGBA Pixel Data
+### Step 3.9: Get RGBA Pixel Data
 
-**Lines 281-287:**
+**Lines 438-444:**
 
 ```javascript
 const imageData = this.ctx.getImageData(
@@ -805,26 +731,48 @@ Byte 4: Red (pixel 1,0)
 ...
 ```
 
-### Step 4.7: Encode Frame
+### Step 3.10: Calculate Real Timestamp
 
-**Lines 289-290:**
+**Lines 446-451:**
 
 ```javascript
-const forceKeyframe = this._frameCount % this.fps === 0;
-const webmCluster = this._encoder.encodeFrame(rgbaData, forceKeyframe);
+const now = Date.now();
+const timestampMs = now - this._streamStartTime;
+
+const forceKeyframe =
+  this._forceKeyframe || this._frameCount % (this.fps * 5) === 0;
+this._forceKeyframe = false;
 ```
 
-**When are keyframes forced?**
-- Frame 0, 24, 48, 72... (every 1 second at 24fps)
-- Keyframes are larger but allow seeking/recovery
+**Real timestamps:**
+- `_streamStartTime` is set when encoding starts
+- Each frame's timestamp is `Date.now() - _streamStartTime`
+- This gives accurate presentation timestamps in milliseconds
 
-**This calls Rust:** `browser/components/cast/src/video_encoder.rs:133-219`
+**When are keyframes forced?**
+- Frame 0, 150, 300, 450... (every 5 seconds at 30fps)
+- Keyframes are larger but allow seeking/recovery
+- Can also force keyframe after resync
+
+### Step 3.11: Encode Frame
+
+**Lines 459-463:**
+
+```javascript
+const webmCluster = this._encoder.encodeFrame(
+  rgbaData,
+  forceKeyframe,
+  timestampMs
+);
+```
+
+**This calls Rust:** `browser/components/cast/src/video_encoder.rs:210-304`
 
 **Rust encoding process:**
 
-#### Step 4.7a: Convert RGBA to I420
+#### Step 3.11a: Convert RGBA to I420
 
-**File:** `browser/components/cast/src/video_encoder.rs:320-368`
+**File:** `browser/components/cast/src/video_encoder.rs:414-455`
 
 ```rust
 fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) {
@@ -832,21 +780,21 @@ fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) {
   for y in 0..height {
     for x in 0..width {
       let rgba_idx = ((y * width + x) * 4) as usize;
-      let r = rgba[rgba_idx] as f32;
-      let g = rgba[rgba_idx + 1] as f32;
-      let b = rgba[rgba_idx + 2] as f32;
+      let r = rgba[rgba_idx] as i32;
+      let g = rgba[rgba_idx + 1] as i32;
+      let b = rgba[rgba_idx + 2] as i32;
 
-      // Convert RGB to Y (luma)
-      let y_val = (0.299 * r + 0.587 * g + 0.114 * b) as u8;
-      y_plane[y * y_stride + x] = y_val;
+      // Convert RGB to Y (luma) using BT.601 coefficients
+      let y_val = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+      y_plane[y * y_stride + x] = y_val.clamp(16, 235) as u8;
 
       // Convert RGB to U and V (chroma) - only for even pixels (4:2:0 subsampling)
       if x % 2 == 0 && y % 2 == 0 {
-        let u_val = ((-0.169 * r - 0.331 * g + 0.500 * b) + 128.0) as u8;
-        let v_val = ((0.500 * r - 0.419 * g - 0.081 * b) + 128.0) as u8;
+        let u_val = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+        let v_val = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
 
-        u_plane[(y/2) * u_stride + (x/2)] = u_val;
-        v_plane[(y/2) * v_stride + (x/2)] = v_val;
+        u_plane[(y/2) * u_stride + (x/2)] = u_val.clamp(16, 240) as u8;
+        v_plane[(y/2) * v_stride + (x/2)] = v_val.clamp(16, 240) as u8;
       }
     }
   }
@@ -865,14 +813,11 @@ fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) {
 - Human vision more sensitive to brightness (Y) than color (UV)
 - Chroma subsampling saves bandwidth without visible quality loss
 
-#### Step 4.7b: Encode with libvpx
+#### Step 3.11b: Encode with libvpx
 
-**File:** `browser/components/cast/src/video_encoder.rs:171-186`
+**File:** `browser/components/cast/src/video_encoder.rs:256-271`
 
 ```rust
-let timestamp_ms = (frame_count * 1000) / (fps as u64);
-let duration = 1000 / fps as u64;  // Duration of this frame in ms
-
 let flags = if force_keyframe {
   VPX_EFLAG_FORCE_KF  // Force keyframe
 } else {
@@ -883,23 +828,23 @@ let ret = vpx_codec_encode(
   vpx_ctx.ctx.as_mut(),
   &vpx_ctx.img as *const vpx_image_t,  // I420 image
   timestamp_ms as i64,                  // PTS (presentation timestamp)
-  duration as u64,                       // Duration in ms
-  flags,                                 // Flags (keyframe, etc.)
+  1000 / fps as u64,                    // Duration in ms
+  flags,                                // Flags (keyframe, etc.)
   VPX_DL_REALTIME                       // Deadline: REALTIME (low latency)
 );
 ```
 
 **libvpx encoding parameters:**
 - `VPX_DL_REALTIME` - Prioritize speed over compression
-- `timestamp_ms` - When to display this frame
-- `duration` - How long to display (41ms at 24fps)
+- `timestamp_ms` - When to display this frame (real timestamp)
+- `duration` - How long to display (33ms at 30fps)
 - `flags` - Force keyframe or allow inter-frame
 
 **Output:** VP8 compressed bitstream (~5-20 KB typically)
 
-#### Step 4.7c: Extract Encoded Packets
+#### Step 3.11c: Extract Encoded Packets
 
-**File:** `browser/components/cast/src/video_encoder.rs:188-206`
+**File:** `browser/components/cast/src/video_encoder.rs:273-288`
 
 ```rust
 let mut iter: vpx_codec_iter_t = std::mem::zeroed();
@@ -927,9 +872,9 @@ loop {
 - Each packet contains raw VP8 bitstream
 - Keyframe flag indicates if this is an I-frame
 
-#### Step 4.7d: Mux into WebM
+#### Step 3.11d: Mux into WebM
 
-**File:** `browser/components/cast/src/video_encoder.rs:208-216`
+**File:** `browser/components/cast/src/video_encoder.rs:290-301`
 
 ```rust
 let mut result = ThinVec::new();
@@ -960,20 +905,26 @@ for (vp8_data, is_keyframe) in vp8_packets {
 
 **Returns:** Complete WebM cluster (typically 8-20 KB)
 
-### Step 4.8: Write to HTTP Stream
+### Step 3.12: Write to HTTP Stream
 
-**Lines 292-297:**
+**Lines 465-477:**
 
 ```javascript
-if (this.streamConnection && webmCluster && webmCluster.length > 0) {
-  this.writeChunk(this.streamConnection.outputStream, webmCluster);
+if (this.streamConnection && webmCluster && webmCluster.length) {
+  if (this._pendingFrames > 60) {
+    // Drop frame if too far behind
+    this._droppedFrames++;
+  } else {
+    this._pendingFrames++;
+    this.writeChunk(this.streamConnection.outputStream, webmCluster);
+  }
 }
 
 this._frameCount++;
 this.lastCaptureTime = Date.now();
 ```
 
-**File:** `browser/components/cast/modules/CastSession.sys.mjs:211-226`
+**File:** `browser/components/cast/modules/CastSession.sys.mjs:271-290`
 
 ```javascript
 writeChunk(outputStream, data) {
@@ -994,6 +945,10 @@ writeChunk(outputStream, data) {
   const chunkFooter = "\r\n";
   outputStream.write(chunkFooter, chunkFooter.length);
   outputStream.flush();  // Send immediately to network
+
+  if (this._pendingFrames > 0) {
+    this._pendingFrames--;
+  }
 }
 ```
 
@@ -1013,11 +968,11 @@ writeChunk(outputStream, data) {
 ← Chunk: Frame 1 (inter-frame, 6012 bytes)
 ← Chunk: Frame 2 (inter-frame, 5891 bytes)
 ...
-← Chunk: Frame 24 (keyframe, 9103 bytes)
+← Chunk: Frame 150 (keyframe, 9103 bytes)
 ...
 ```
 
-### Step 4.9: Cast Device Processing
+### Step 3.13: Cast Device Processing
 
 **Cast device:**
 1. Receives HTTP chunks
@@ -1025,7 +980,7 @@ writeChunk(outputStream, data) {
 3. Parses WebM structure
 4. Extracts VP8 frames
 5. Decodes VP8 with hardware decoder
-6. Renders to display at 24fps
+6. Renders to display at 30fps
 
 **Buffering strategy:**
 ```
@@ -1033,8 +988,8 @@ T+5000ms: Receives Frame 0
 T+5010ms: Buffers...
 T+5200ms: Starts playback (200ms buffer)
 T+5200ms: Displays Frame 0
-T+5242ms: Displays Frame 1
-T+5283ms: Displays Frame 2
+T+5233ms: Displays Frame 1
+T+5266ms: Displays Frame 2
 ```
 
 ---
@@ -1048,7 +1003,7 @@ Time    | Firefox                          | Cast Device
 --------|----------------------------------|---------------------------
 T+0ms   | User clicks Cast button          |
 T+50ms  | addManualDevice()                |
-T+500ms | Certificate validation           |
+T+500ms | Certificate exception added      |
 T+1000ms| device.connect()                 | Receives CONNECT
 T+1100ms| TLS handshake                    | TLS handshake
 T+1200ms| Send CONNECT, GET_STATUS         | Processes messages
@@ -1056,27 +1011,24 @@ T+1300ms| startTabCasting()                | Sends RECEIVER_STATUS
 T+1400ms| Initialize encoder               |
 T+1500ms| Start HTTP server                |
 T+1600ms| Send LOAD command                | Receives LOAD
-T+1700ms| Condition 1: MEDIA_STATUS rcvd ✓ | Sends MEDIA_STATUS (IDLE)
 T+2000ms|                                  | Initialize media player
-T+3000ms|                                  | Resolve hostname
-T+5000ms| Condition 2: Stream connected ✓  | Makes HTTP GET request
-T+5000ms| handleStreamRequest() triggered! |
+T+3000ms|                                  | Resolve hostname (mDNS)
+T+5000ms| handleStreamRequest() triggered! | Makes HTTP GET request
 T+5001ms| Send HTTP headers                | Receives headers
 T+5002ms| Send WebM header                 | Receives WebM header
-T+5003ms| BOTH CONDITIONS MET!             |
 T+5003ms| Start capture loop NOW           |
 T+5003ms| captureFrame() - Frame 0         |
 T+5010ms| Encode complete                  | Receives Frame 0
 T+5011ms| Send Frame 0                     | Starts buffering
-T+5045ms| captureFrame() - Frame 1         |
-T+5052ms| Send Frame 1                     | Receives Frame 1
-T+5087ms| captureFrame() - Frame 2         |
-T+5094ms| Send Frame 2                     | Receives Frame 2
+T+5036ms| captureFrame() - Frame 1         |
+T+5043ms| Send Frame 1                     | Receives Frame 1
+T+5069ms| captureFrame() - Frame 2         |
+T+5076ms| Send Frame 2                     | Receives Frame 2
 T+5200ms|                                  | Start playback!
 T+5200ms|                                  | Display Frame 0
-T+5242ms|                                  | Display Frame 1
-T+5283ms|                                  | Display Frame 2
-...     | Continues every ~42ms            | Continues playback
+T+5233ms|                                  | Display Frame 1
+T+5266ms|                                  | Display Frame 2
+...     | Continues every ~33ms            | Continues playback
 ```
 
 ### Latency Breakdown
@@ -1152,28 +1104,32 @@ Frame 1 (6012 bytes)     →   1774\r\n              →
 
 ## Key Takeaways
 
-1. **Encoding only starts when Cast device connects** - Solves the 10-second lag problem
+1. **Encoding starts when Cast device connects to HTTP stream** - No complex two-condition synchronization needed
 
-2. **Three-layer encoding pipeline:**
+2. **Real timestamps from stream start** - Each frame has accurate presentation timestamp based on `Date.now() - streamStartTime`
+
+3. **Three-layer encoding pipeline:**
    - JavaScript: Capture & coordination
    - Rust: VP8 encoding (fast, safe)
    - C++ (libvpx): Actual compression
 
-3. **HTTP chunked encoding enables streaming:**
+4. **HTTP chunked encoding enables streaming:**
    - No `Content-Length` header needed
    - Indefinite stream length
    - Cast device starts playing while receiving
 
-4. **WebM muxer is essential:**
+5. **WebM muxer is essential:**
    - Wraps raw VP8 in container
    - Provides timestamps
    - Enables playback on Cast devices
 
-5. **Latency is dominated by Cast device buffering:**
+6. **Latency is dominated by Cast device buffering:**
    - Encoding: ~20ms
    - Network: ~5ms
    - Cast buffering: ~200ms
    - Total: ~225ms (acceptable for tab casting)
+
+7. **Adaptive frame dropping** prevents buffer buildup when network or encoder falls behind
 
 ---
 

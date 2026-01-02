@@ -46,6 +46,7 @@ export class CastService extends EventTarget {
     enabled: false,
     devices: [],
     activeSessionCount: 0,
+    activeDeviceId: null,
   };
 
   static init() {
@@ -139,6 +140,21 @@ export class CastService extends EventTarget {
 
   get state() {
     return Object.freeze(structuredClone(this.#_state));
+  }
+
+  getActiveDevice() {
+    if (!this.#_state.activeDeviceId) {
+      return null;
+    }
+    const device = this.#devices.get(this.#_state.activeDeviceId);
+    if (!device) {
+      return null;
+    }
+    return {
+      id: device.id,
+      address: device.address,
+      friendlyName: device.friendlyName,
+    };
   }
 
   stateUpdate() {
@@ -240,6 +256,7 @@ export class CastService extends EventTarget {
     try {
       const result = await session.start(browser, options);
       this.#_state.activeSessionCount = this.#sessions.size;
+      this.#_state.activeDeviceId = deviceId;
       this.stateUpdate();
       lazy.logConsole.debug(`Tab casting started for ${deviceId}`, result);
       return result;
@@ -281,6 +298,9 @@ export class CastService extends EventTarget {
     }
 
     this.#_state.activeSessionCount = this.#sessions.size;
+    if (this.#sessions.size === 0) {
+      this.#_state.activeDeviceId = null;
+    }
     this.stateUpdate();
   }
 
@@ -317,6 +337,7 @@ export class CastService extends EventTarget {
 
     this.#sessions.clear();
     this.#_state.activeSessionCount = 0;
+    this.#_state.activeDeviceId = null;
     this.stateUpdate();
   }
 

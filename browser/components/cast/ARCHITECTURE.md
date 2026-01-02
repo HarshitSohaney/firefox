@@ -1,21 +1,21 @@
-# Cast Architecture - Clean and Simple
+# Cast Architecture
 
 ## Overview
 
-Firefox Cast implementation uses **Rust XPCOM components** for the protocol layer with JavaScript wrappers for UI integration.
+Firefox Cast implementation uses **Rust XPCOM components** for the protocol layer and video encoding, with JavaScript modules for UI integration, session management, and device discovery.
 
 ## Why XPCOM? (Not FFI)
 
 We use **XPCOM** (Cross-Platform Component Object Model) instead of direct FFI:
 
-### XPCOM Approach ✅ (What We Use)
+### XPCOM Approach (What We Use)
 - Firefox's official component system
 - Automatic memory management
 - Built-in callback support for async events
 - Reference counting, QueryInterface, etc.
 - Clean separation between JS and Rust
 
-### FFI Approach ❌ (What We Rejected)
+### FFI Approach (What We Rejected)
 - FFI = Foreign Function Interface
 - Direct C-style function calls from JS to Rust
 - Manual memory management (unsafe, error-prone)
@@ -24,194 +24,168 @@ We use **XPCOM** (Cross-Platform Component Object Model) instead of direct FFI:
 
 **Decision:** XPCOM is the Firefox way. FFI would be reinventing the wheel.
 
-## File Structure (Clean)
+## File Structure
 
 ```
 browser/components/cast/
-│
-├── JavaScript Layer
-│   ├── CastDevice.sys.mjs              ← Wrapper around Rust XPCOM
-│   └── CastServiceWrapper.sys.mjs      ← High-level service
-│
-├── XPCOM Interface
-│   ├── nsICastDevice.idl               ← Interface definition (JS ↔ Rust)
-│   ├── components.conf                 ← Component registration
-│   └── cast_device.h                   ← C++ header for registration
-│
-├── Rust Implementation (src/)
-│   ├── lib.rs                          ← Crate root, exports NS_NewCastDevice
-│   ├── cast_device.rs                  ← XPCOM component (TLS, connection)
-│   ├── stream_listener.rs              ← Async message receiver
-│   ├── message.rs                      ← Protocol Buffer messages
-│   └── handlers/                       ← Protocol helpers
-│       ├── mod.rs
-│       ├── connection.rs               ← CONNECT message helper
-│       ├── heartbeat.rs                ← PING/PONG helper
-│       └── receiver.rs                 ← GET_STATUS/LAUNCH helpers
-│
-└── Build Configuration
-    ├── Cargo.toml                      ← Rust dependencies
-    └── moz.build                       ← Firefox build integration
+|
++-- Service Layer
+|   +-- CastService.sys.mjs            # Singleton service managing devices and sessions
+|
++-- JavaScript Modules (modules/)
+|   +-- CastDevice.sys.mjs             # Wrapper around Rust XPCOM device
+|   +-- CastSession.sys.mjs            # Tab casting (capture, encode, stream)
+|   +-- CastMediaSession.sys.mjs       # Remote URL casting
+|   +-- CastMediaHandler.sys.mjs       # Media namespace protocol
+|   +-- CastDiscovery.sys.mjs          # mDNS device discovery
+|   +-- SimpleHTTPServer.sys.mjs       # HTTP server for video streaming
+|   +-- CastConstants.mjs              # Error codes, states, namespaces
+|   +-- CastError.mjs                  # Custom error type
+|
++-- XPCOM Interfaces
+|   +-- nsICastDevice.idl              # Device protocol interface (JS <-> Rust)
+|   +-- nsICastVideoEncoder.idl        # Video encoder interface (JS <-> Rust)
+|   +-- components.conf                # Component registration
+|   +-- cast_device.h                  # C++ header for device registration
+|   +-- cast_video_encoder.h           # C++ header for encoder registration
+|
++-- Rust Implementation (src/)
+|   +-- lib.rs                         # Crate root, exports XPCOM constructors
+|   +-- cast_device.rs                 # Device XPCOM component (TLS, protocol)
+|   +-- stream_listener.rs             # Async message receiver
+|   +-- message.rs                     # Protocol Buffer message structures
+|   +-- messages.rs                    # Message handling utilities
+|   +-- state.rs                       # DeviceState enum
+|   +-- constants.rs                   # Protocol constants
+|   +-- video_encoder.rs               # VP9 encoder XPCOM component
+|   +-- vpx_ffi.rs                     # FFI bindings to libvpx
+|   +-- webm_writer_ffi.rs             # FFI bindings for WebM muxing
+|   +-- handlers/
+|       +-- mod.rs                     # Handler module exports
+|       +-- connection.rs              # CONNECT message helper
+|       +-- heartbeat.rs               # PING/PONG helper
+|       +-- receiver.rs                # GET_STATUS/LAUNCH helpers
+|
++-- Build Configuration
+    +-- Cargo.toml                     # Rust dependencies
+    +-- moz.build                      # Firefox build integration
 ```
 
-## How It Works
+## Component Descriptions
 
-### 1. Component Creation
+### Service Layer
 
-**JavaScript (CastDevice.sys.mjs:20-22):**
-```javascript
-this._xpcomDevice = Cc["@mozilla.org/cast/device;1"].createInstance(
-  Ci.nsICastDevice
-);
-```
+**CastService.sys.mjs**
+Singleton service managing Cast device discovery, connections, and casting sessions. Coordinates between device management, mDNS discovery, and active casting operations.
 
-**Rust (lib.rs:11-29):**
-```rust
-#[no_mangle]
-pub unsafe extern "C" fn NS_NewCastDevice(
-    iid: &xpcom::nsIID,
-    result: *mut *mut libc::c_void,
-) -> nserror::nsresult {
-    let device = cast_device::CastDevice::new();
-    device.QueryInterface(iid, result)
-}
-```
+### JavaScript Modules
 
-### 2. Method Calls
+**CastDevice.sys.mjs**
+JavaScript wrapper around the Rust XPCOM device component. Provides Promise-based API over callback-based XPCOM, manages event listeners, handles heartbeat timer.
 
-**JavaScript calls:**
-```javascript
-await this._xpcomDevice.connect(address, port);
-```
+**CastSession.sys.mjs**
+Manages tab casting to a Cast device. Handles screen capture, VP9 encoding via the Rust encoder, HTTP streaming through SimpleHTTPServer, and media session coordination.
 
-**Rust receives:**
-```rust
-xpcom_method!(connect => Connect(address: *const nsACString, port: i32));
-fn connect(&self, address: &nsACString, port: i32) -> Result<(), nsresult> {
-    // Implementation
-}
-```
+**CastMediaSession.sys.mjs**
+Manages casting of remote media URLs (not tab content). Simpler than CastSession as the Cast device fetches content directly from the URL.
 
-### 3. Callbacks (Async Events)
+**CastMediaHandler.sys.mjs**
+Handles Cast Media namespace protocol commands. Manages media session lifecycle: load, play, pause, stop, seek.
 
-**JavaScript sets callback:**
-```javascript
-this._xpcomDevice.callback = {
-  onStateChanged(state) { /* handle state */ },
-  onMessage(namespace, payload) { /* handle message */ },
-  onError(error) { /* handle error */ }
-};
-```
+**CastDiscovery.sys.mjs**
+Discovers Cast devices on the local network using mDNS. Sends DNS-SD queries and parses responses for _googlecast._tcp.local services.
 
-**Rust calls back:**
-```rust
-fn notify_state_change(&self, state: &str) {
-    if let Some(callback) = self.callback.borrow().as_ref() {
-        unsafe {
-            callback.OnStateChanged(&nsCString::from(state) as &nsACString);
-        }
-    }
-}
-```
+**SimpleHTTPServer.sys.mjs**
+Minimal HTTP server for streaming video to Cast devices. Supports chunked transfer encoding and CORS headers.
+
+**CastConstants.mjs**
+Defines error codes (CAST_ERRORS), states (CAST_STATES), app IDs (CAST_APP_IDS), namespaces (CAST_NAMESPACES), and default configuration values.
+
+**CastError.mjs**
+Custom error type for Cast operations. Includes error cause code and supports serialization for IPC.
+
+### Rust Components
+
+**cast_device.rs**
+Core Cast protocol implementation as XPCOM component. Handles TLS connection via nsISocketTransport, message encoding/decoding (Protocol Buffers), and JavaScript callbacks.
+
+**video_encoder.rs**
+XPCOM video encoder component using VP9 codec. Encodes RGBA frames to VP9 and wraps them in WebM container format.
+
+**stream_listener.rs**
+Async message receiver implementing nsIStreamListener. Parses message frames (4-byte length + protobuf), decodes messages, routes by namespace.
+
+**message.rs**
+Protocol Buffer message structures using prost crate.
+
+**state.rs**
+DeviceState enum (Disconnected, Connecting, Connected, Launching, Streaming, Error).
+
+**vpx_ffi.rs / webm_writer_ffi.rs**
+FFI bindings to libvpx for VP9 encoding and WebM container writing.
+
+**handlers/**
+Protocol helpers for connection, heartbeat, and receiver namespaces.
 
 ## Data Flow
 
+### Device Discovery
+```
+CastService.init()
+    |
+CastDiscovery.start()
+    |
+Send mDNS query for _googlecast._tcp.local
+    |
+Parse DNS-SD responses
+    |
+CastService receives device info via callback
+    |
+Create CastDevice instances
+```
+
+### Tab Casting
 ```
 User clicks Cast icon
-    ↓
-CastServiceWrapper.addManualDevice(ip)
-    ↓
-new CastDevice(id, ip) [JavaScript]
-    ↓
-Creates Cc["@mozilla.org/cast/device;1"] [XPCOM]
-    ↓
-Calls NS_NewCastDevice() [Rust]
-    ↓
-Creates CastDevice::new() [Rust struct]
-    ↓
-device.connect() [JavaScript calls XPCOM]
-    ↓
-Connect() method [Rust implementation]
-    ↓
-- Create TLS transport (nsISocketTransport)
-    - Open output stream
-    - Send CONNECT message
-    - Open input stream
-    - Create stream listener (CastStreamListener)
-    - Start async reading (nsIInputStreamPump)
-    ↓
-Callback: onStateChanged("connected") [Rust → JS]
-    ↓
-Promise resolves [JavaScript]
-    ↓
-UI updates, alert shown
+    |
+CastService.startCasting(device, tab)
+    |
+new CastSession(device, window)
+    |
+CastSession.start()
+    |
+    +-- CastDevice.connect() [XPCOM -> Rust TLS connection]
+    +-- SimpleHTTPServer.start() [HTTP server for video]
+    +-- CastMediaHandler.load(streamUrl) [Tell device to fetch stream]
+    |
+Tab capture starts (canvas screenshot loop)
+    |
+    +-- CastVideoEncoder.encodeFrame() [Rust VP9 encoding]
+    +-- HTTP chunked response to Cast device
+    |
+Device plays video stream
 ```
 
-## Key Components
-
-### CastDevice.sys.mjs (JavaScript Wrapper)
-**Purpose:** Provide Promise-based API over callback-based XPCOM
-
-**Responsibilities:**
-- Create XPCOM component instance
-- Set up callback handlers
-- Convert callbacks to Promises
-- Manage event listeners
-- Handle heartbeat timer
-
-**Why needed:** XPCOM is callback-based, modern JS is Promise-based. This wrapper bridges the gap.
-
-### cast_device.rs (Rust XPCOM Component)
-**Purpose:** Core Cast protocol implementation
-
-**Responsibilities:**
-- TLS connection via nsISocketTransport
-- Message encoding/decoding (Protocol Buffers)
-- Send messages to Cast device
-- Manage connection state
-- Call JavaScript callbacks
-
-**Why Rust:** Type safety, memory safety, excellent protobuf support (prost crate).
-
-### stream_listener.rs (Async Message Receiver)
-**Purpose:** Handle incoming messages from Cast device
-
-**Responsibilities:**
-- Implement nsIStreamListener pattern
-- Parse message frames (4-byte length + protobuf)
-- Decode Protocol Buffer messages
-- Route messages by namespace
-- Handle protocol logic (PING→PONG, app connection, etc.)
-
-**Why separate:** Async I/O requires callback pattern (OnDataAvailable). Clean separation of concerns.
-
-### message.rs (Protocol Buffers)
-**Purpose:** Define Cast protocol message structure
-
-**Uses:** `prost` crate for compile-time protobuf
-
-```rust
-#[derive(Clone, PartialEq, Message)]
-pub struct CastMessage {
-    #[prost(enumeration = "i32", required, tag = "1")]
-    pub protocol_version: i32,
-    #[prost(string, required, tag = "2")]
-    pub source_id: String,
-    // ... etc
-}
+### Remote Media Casting
+```
+CastService.castUrl(device, mediaUrl)
+    |
+new CastMediaSession(device)
+    |
+CastMediaSession.start(mediaUrl)
+    |
+CastDevice.connect() [if not connected]
+    |
+CastMediaHandler.load(mediaUrl)
+    |
+Device fetches and plays media directly
 ```
 
 ## Message Flow Example
 
 ### Sending CONNECT
 
-**JavaScript:**
-```javascript
-// User code doesn't directly send CONNECT, happens during connect()
-await device.connect();
-```
-
-**Rust (cast_device.rs:95-97):**
+**Rust (cast_device.rs):**
 ```rust
 let connect_payload = ConnectionHandler::create_connect_message();
 self.send_message_internal(ConnectionHandler::NAMESPACE, &connect_payload)?;
@@ -235,7 +209,7 @@ Protobuf:
 
 **Wire:** Device sends framed protobuf message
 
-**Rust (stream_listener.rs:69-87):**
+**Rust (stream_listener.rs):**
 ```rust
 fn handle_received_data(&self, data: &[u8]) {
     // Parse 4-byte length
@@ -249,17 +223,6 @@ fn handle_received_data(&self, data: &[u8]) {
 }
 ```
 
-**Rust (stream_listener.rs:121-185):**
-```rust
-if namespace == "urn:x-cast:com.google.cast.receiver" {
-    if parsed["type"] == "RECEIVER_STATUS" {
-        // Check if app running
-        // If not: LAUNCH DefaultMediaReceiver
-        // If yes: CONNECT to app's transportId
-    }
-}
-```
-
 ## Why This Architecture?
 
 ### Advantages
@@ -269,33 +232,29 @@ if namespace == "urn:x-cast:com.google.cast.receiver" {
 3. **Performance:** Rust is as fast as C++, faster than JavaScript
 4. **Firefox Integration:** XPCOM is the standard way
 5. **Async I/O:** nsIStreamListener pattern handles async messages cleanly
-6. **Clean Separation:** JavaScript for UI, Rust for protocol
+6. **Clean Separation:** JavaScript for UI/orchestration, Rust for protocol/encoding
 
 ### Alternatives Considered
 
 **Pure JavaScript + TCPSocket:**
-- ❌ Manual protobuf encoding/decoding (error-prone)
-- ❌ More complex state management
-- ❌ Slower performance
-- ❌ Less type safety
+- Manual protobuf encoding/decoding (error-prone)
+- More complex state management
+- Slower performance for video encoding
+- Less type safety
 
 **JavaScript + FFI to Rust:**
-- ❌ Manual memory management
-- ❌ Callback complexity
-- ❌ Not the Firefox way
-
-**Pure Rust + JSM:**
-- ❌ Would need JavaScript wrapper anyway for UI
-- ❌ More boilerplate
+- Manual memory management
+- Callback complexity
+- Not the Firefox way
 
 **XPCOM (chosen):**
-- ✅ Best of both worlds
-- ✅ Firefox standard
-- ✅ Clean, maintainable
+- Best of both worlds
+- Firefox standard
+- Clean, maintainable
 
 ## Common Questions
 
-### Q: Why not use C++ for the XPCOM component?
+### Q: Why not use C++ for the XPCOM components?
 
 **A:** Rust provides:
 - Memory safety without garbage collection
@@ -315,15 +274,11 @@ if namespace == "urn:x-cast:com.google.cast.receiver" {
 
 ### Q: What's the performance overhead of XPCOM?
 
-**A:** Negligible. XPCOM calls are essentially virtual function calls. The real work (TLS, protobuf) happens in Rust.
-
-### Q: Can we call Rust directly from browser-cast.js?
-
-**A:** No. browser-cast.js has no access to XPCOM. It must go through the ESM module system (CastServiceWrapper → CastDevice → XPCOM).
+**A:** Negligible. XPCOM calls are essentially virtual function calls. The real work (TLS, protobuf, VP9 encoding) happens in Rust.
 
 ## Debugging Tips
 
-### Enable Rust Logging
+### Enable Logging
 ```bash
 MOZ_LOG=cast:5 ./mach run
 ```
@@ -347,13 +302,3 @@ device.connect("10.0.0.171", 8009);
 ls obj-*/dist/xpcrs/rt/nsICastDevice.rs
 # Should exist after build
 ```
-
-## Phase 2 Additions (Upcoming)
-
-For tab casting, we'll add:
-- **CastMediaHandler.sys.mjs** - Media namespace protocol
-- **CastTabCapture.sys.mjs** - Tab screenshot capture
-- **CastMediaServer.sys.mjs** - HTTP MJPEG server
-- **src/handlers/media.rs** - Media protocol messages
-
-The architecture will remain the same: Rust for protocol, JavaScript for higher-level orchestration.

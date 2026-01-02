@@ -45,6 +45,9 @@
 }
 
 .cast-device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: var(--space-small) var(--space-medium);
   border: none;
   margin: 0;
@@ -59,20 +62,38 @@
   background-color: var(--panel-item-active-bgcolor);
 }
 
+.cast-device-item.casting {
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 10%, transparent);
+}
+
+.cast-device-item.casting:hover {
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 15%, transparent);
+}
+
 .cast-device-name {
+  flex: 1;
+}
+
+.cast-device-status {
+  font-size: 0.85em;
   font-weight: var(--font-weight-semibold);
+  color: var(--toolbarbutton-icon-fill-attention, #0060df);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-small);
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 15%, transparent);
 }
 
 #castPanel-activeSession {
   padding: var(--space-medium);
-  background-color: var(--panel-separator-color);
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 8%, transparent);
   border-top: 1px solid var(--panel-separator-color);
 }
 
 .cast-active-indicator {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-small);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-medium);
 }
 
 #castPanel-castingLabel {
@@ -82,6 +103,7 @@
 
 #castPanel-stopButton {
   padding: 6px var(--space-medium);
+  flex-shrink: 0;
 }
 
 #castPanel-manualAdd {

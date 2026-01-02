@@ -10,14 +10,14 @@ use std::cell::RefCell;
 use thin_vec::ThinVec;
 use xpcom::{xpcom_method, RefPtr};
 
-/// XPCOM video encoder component using VP9 codec.
-/// Encodes RGBA frames to VP9 and wraps them in WebM container format.
+/// XPCOM video encoder component using vp8 codec.
+/// Encodes RGBA frames to vp8 and wraps them in WebM container format.
 #[xpcom::xpcom(implement(nsICastVideoEncoder), atomic)]
 pub struct CastVideoEncoder {
     state: RefCell<EncoderState>,
 }
 
-/// Internal encoder state including VP9 context and WebM muxer.
+/// Internal encoder state including vp8 context and WebM muxer.
 struct EncoderState {
     vpx_ctx: Option<VpxContext>,
     muxer: Option<WebMWriter>,
@@ -28,7 +28,7 @@ struct EncoderState {
     fps: u32,
 }
 
-/// VP9 encoder context with image buffer for frame data.
+/// vp8 encoder context with image buffer for frame data.
 struct VpxContext {
     ctx: Box<vpx_codec_ctx>,
     img: vpx_image_t,
@@ -180,17 +180,17 @@ impl CastVideoEncoder {
         Ok(())
     }
 
-    /// Encode a single RGBA frame to VP9 and wrap in WebM cluster.
+    /// Encode a single RGBA frame to vp8 and wrap in WebM cluster.
     ///
     /// Frame Encoding Pipeline:
     /// 1. Input: RGBA pixels (width * height * 4 bytes)
-    /// 2. Convert RGBA to I420 planar YUV format for VP9
-    /// 3. Encode with VP9 codec (target bitrate, keyframe control)
+    /// 2. Convert RGBA to I420 planar YUV format for vp8
+    /// 3. Encode with vp8 codec (target bitrate, keyframe control)
     /// 4. Wrap compressed frame in WebM cluster container
     /// 5. Output: WebM cluster bytes ready for HTTP streaming
     ///
-    /// VP9 Encoding:
-    /// - Uses libvpx VP9 encoder
+    /// vp8 Encoding:
+    /// - Uses libvpx vp8 encoder
     /// - Configured for low-latency (no B-frames)
     /// - Variable bitrate with target bitrate from init()
     /// - Keyframes forced periodically or on demand
@@ -198,10 +198,10 @@ impl CastVideoEncoder {
     /// WebM Container:
     /// - Each frame becomes a WebM Cluster element
     /// - Cluster contains: timestamp + SimpleBlock (compressed frame)
-    /// - Cast device parses clusters to extract VP9 frames
+    /// - Cast device parses clusters to extract vp8 frames
     ///
     /// Buffer Flow:
-    /// RGBA Array -> I420 Buffer -> VP9 Encoder -> Compressed Frame -> WebM Writer -> Cluster Bytes
+    /// RGBA Array -> I420 Buffer -> vp8 Encoder -> Compressed Frame -> WebM Writer -> Cluster Bytes
     ///
     /// @param rgba_data RGBA pixel buffer (width * height * 4 bytes)
     /// @param force_keyframe True to force this frame to be a keyframe
@@ -249,7 +249,7 @@ impl CastVideoEncoder {
             rgba_to_i420(rgba_data, width, height, &mut vpx_ctx.img)?;
         }
 
-        // Collect compressed VP9 packets from encoder
+        // Collect compressed vp8 packets from encoder
         // May produce multiple packets per frame
         let mut vp8_packets: Vec<(Vec<u8>, bool)> = Vec::new();
 
@@ -287,7 +287,7 @@ impl CastVideoEncoder {
             }
         }
 
-        // Wrap VP9 frames in WebM container format
+        // Wrap vp8 frames in WebM container format
         // Each frame becomes a WebM Cluster that can be streamed individually
         let mut result = ThinVec::new();
         let muxer = state.muxer.as_ref().unwrap();
