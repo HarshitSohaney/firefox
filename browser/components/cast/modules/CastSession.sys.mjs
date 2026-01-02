@@ -43,10 +43,10 @@ export class CastSession {
     this.height = 0;
     this.isCapturing = false;
     this.lastCaptureTime = 0;
-    this._receivedMediaStatus = false;
-    this._pendingStreamConnection = null;
     this._pendingFrames = 0;
     this._droppedFrames = 0;
+    this._playbackStarted = false;
+    this._measuredLagMs = 0;
   }
 
   /**
@@ -120,7 +120,7 @@ export class CastSession {
         willReadFrequently: true,
       });
 
-      this.fps = options.fps || 30;
+      this.fps = options.fps || 60;
       const videoBitsPerSecond = options.bitrate || 25000000;
 
       lazy.logConsole.debug(
@@ -248,17 +248,8 @@ export class CastSession {
       this.streamConnection = connection;
       this._frameCount = 0;
 
-      if (this._receivedMediaStatus) {
-        lazy.logConsole.debug(
-          "Media status already received, starting encoding now"
-        );
-        this.startCaptureLoop();
-      } else {
-        lazy.logConsole.debug(
-          "Waiting for first MEDIA_STATUS before starting encoding..."
-        );
-        this._pendingStreamConnection = true;
-      }
+      lazy.logConsole.debug("Cast device connected, starting capture immediately");
+      this.startCaptureLoop();
     } catch (e) {
       lazy.logConsole.error("Error in handleStreamRequest:", e);
       if (this.server) {
@@ -334,6 +325,26 @@ export class CastSession {
     this.captureInterval = this.window.requestAnimationFrame(captureLoop);
   }
 
+  onPlaybackStarted(castCurrentTime) {
+    if (this._playbackStarted) {
+      return;
+    }
+
+    this._playbackStarted = true;
+    const streamElapsedSec = (Date.now() - this._streamStartTime) / 1000;
+    const lagSec = streamElapsedSec - castCurrentTime;
+    this._measuredLagMs = lagSec * 1000;
+
+    lazy.logConsole.debug(
+      `Cast PLAYING: currentTime=${castCurrentTime.toFixed(2)}s, ` +
+        `stream=${streamElapsedSec.toFixed(2)}s, lag=${lagSec.toFixed(2)}s`
+    );
+  }
+
+  getMeasuredLag() {
+    return this._measuredLagMs || 0;
+  }
+
   async captureFrame() {
     if (!this.browser || !this._encoder || !this.canvas) {
       return;
@@ -352,30 +363,12 @@ export class CastSession {
         return;
       }
 
-      // Use 1x scale to avoid downscaling artifacts
       const scale = 1;
-
-      let scrollX = 0;
-      let scrollY = 0;
-
-      try {
-        const actor =
-          this.browser.browsingContext.currentWindowGlobal.getActor("CastTab");
-        const viewportInfo = await actor.getViewportInfo();
-        if (viewportInfo) {
-          scrollX = viewportInfo.scrollX || 0;
-          scrollY = viewportInfo.scrollY || 0;
-        }
-      } catch (e) {
-        lazy.logConsole.error("Failed to get viewport info:", e);
-      }
-
-      const rect = new DOMRect(scrollX, scrollY, this.width, this.height);
       const flags =
         browsingContext.currentWindowGlobal.DRAWSNAPSHOT_DRAW_CARET |
         browsingContext.currentWindowGlobal.DRAWSNAPSHOT_USE_WIDGET_LAYERS;
       const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
-        rect,
+        null,
         scale,
         "rgb(255, 255, 255)",
         flags
@@ -489,8 +482,8 @@ export class CastSession {
     this._frameCount = 0;
     this._encodingStarted = false;
     this._streamStartTime = null;
-    this._receivedMediaStatus = false;
-    this._pendingStreamConnection = null;
+    this._playbackStarted = false;
+    this._measuredLagMs = 0;
 
     if (this.tabCloseListener) {
       try {
@@ -538,22 +531,17 @@ export class CastSession {
       if (message.type === "MEDIA_STATUS") {
         const status = this.mediaHandler.handleMediaStatus(payload);
 
-        if (!this._receivedMediaStatus) {
-          this._receivedMediaStatus = true;
-          lazy.logConsole.debug("Received first MEDIA_STATUS");
-
-          if (this._pendingStreamConnection && this.streamConnection) {
-            lazy.logConsole.debug(
-              "Stream connection is ready, starting encoding now"
-            );
-            this._pendingStreamConnection = false;
-            this.startCaptureLoop();
-          }
-        }
-
         if (status?.idleReason === "ERROR") {
           lazy.logConsole.error("Media playback error");
           this.setState("error");
+        }
+
+        if (
+          status?.playerState === "PLAYING" &&
+          !this._playbackStarted &&
+          this._streamStartTime
+        ) {
+          this.onPlaybackStarted(status.currentTime || 0);
         }
       } else if (message.type === "LOAD_FAILED") {
         lazy.logConsole.error("LOAD_FAILED:", message);

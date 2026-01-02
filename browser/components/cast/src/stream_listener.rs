@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use crate::constants::namespaces;
+use crate::constants::{namespaces, DEFAULT_MEDIA_RECEIVER_APP_ID};
 use crate::handlers::{ConnectionHandler, HeartbeatHandler};
 use crate::message::CastMessage;
 use crate::messages::{ConnectionMessage, ReceiverMessage};
@@ -249,8 +249,12 @@ impl CastStreamListener {
                             println!("CastStreamListener: App launched successfully");
                         }
                     }
-                // App is running: Extract session/transport IDs and connect to app
-                } else if let Some(app) = status.applications.first() {
+                // App is running: Only connect if it's the DefaultMediaReceiver
+                } else if let Some(app) = status
+                    .applications
+                    .iter()
+                    .find(|a| a.app_id == DEFAULT_MEDIA_RECEIVER_APP_ID)
+                {
                     if device.get_app_session_id() != Some(app.session_id.clone()) {
                         device.set_app_session_id(Some(app.session_id.clone()));
                     }
@@ -281,6 +285,16 @@ impl CastStreamListener {
                         }
                     } else {
                         println!("CastStreamListener: Already connected to app");
+                    }
+                } else if !status.applications.is_empty() {
+                    // Wrong app is running, launch the correct one
+                    println!(
+                        "CastStreamListener: Wrong app running ({}), launching DefaultMediaReceiver",
+                        status.applications[0].app_id
+                    );
+                    let launch = device.create_launch_message(None);
+                    if let Err(e) = device.send_message_internal(namespaces::RECEIVER, &launch) {
+                        println!("CastStreamListener: Failed to send LAUNCH: {:?}", e);
                     }
                 }
             }

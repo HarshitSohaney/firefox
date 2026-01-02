@@ -19,8 +19,6 @@ XPCOM_MANIFESTS += [
 ]
 
 EXTRA_JS_MODULES.cast = [
-    "actors/CastTabChild.sys.mjs",
-    "actors/CastTabParent.sys.mjs",
     "CastService.sys.mjs",
     "modules/CastConstants.mjs",
     "modules/CastDevice.sys.mjs",
