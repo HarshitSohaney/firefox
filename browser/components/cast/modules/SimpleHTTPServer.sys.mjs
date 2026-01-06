@@ -248,7 +248,9 @@ export class SimpleHTTPServer {
     if (castDeviceIP) {
       const parts = castDeviceIP.split(".");
       if (parts.length === 4) {
-        console.warn("SimpleHTTPServer: Using fallback IP guess (may not work)");
+        console.warn(
+          "SimpleHTTPServer: Using fallback IP guess (may not work)"
+        );
         return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
       }
     }

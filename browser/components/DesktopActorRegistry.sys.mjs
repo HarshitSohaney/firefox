@@ -808,6 +808,16 @@ let JSWINDOWACTORS = {
 
     allFrames: true,
   },
+
+  CastAudioCapture: {
+    parent: {
+      esModuleURI: "resource:///actors/CastAudioCaptureParent.sys.mjs",
+    },
+    child: {
+      esModuleURI: "resource:///actors/CastAudioCaptureChild.sys.mjs",
+    },
+    messageManagerGroups: ["browsers"],
+  },
 };
 
 export let DesktopActorRegistry = {

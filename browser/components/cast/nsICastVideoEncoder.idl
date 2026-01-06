@@ -7,12 +7,13 @@
 /**
  * Cast video encoder using VP9.
  * Encodes RGBA frames to VP9 and wraps them in WebM containers.
+ * Optionally supports audio via Opus codec.
  */
 [scriptable, uuid(e3b2c4d6-7890-4abc-def1-234567890abc)]
 interface nsICastVideoEncoder : nsISupports
 {
     /**
-     * Initialize the encoder.
+     * Initialize the encoder for video only.
      * @param width Frame width in pixels
      * @param height Frame height in pixels
      * @param bitrate Target bitrate in bits per second
@@ -22,6 +23,22 @@ interface nsICastVideoEncoder : nsISupports
               in unsigned long bitrate, in unsigned long fps);
 
     /**
+     * Initialize the encoder for combined video and audio.
+     * @param width Frame width in pixels
+     * @param height Frame height in pixels
+     * @param bitrate Target video bitrate in bits per second
+     * @param fps Frames per second
+     * @param audioChannels Audio channel count (typically 2 for stereo)
+     * @param audioSampleRate Audio sample rate in Hz (typically 48000)
+     * @param audioPreskip Opus preskip value (encoder lookahead samples)
+     */
+    void initWithAudio(in unsigned long width, in unsigned long height,
+                       in unsigned long bitrate, in unsigned long fps,
+                       in unsigned long audioChannels,
+                       in unsigned long audioSampleRate,
+                       in unsigned short audioPreskip);
+
+    /**
      * Encode a single RGBA frame.
      * @param rgbaData Raw RGBA pixel data
      * @param forceKeyframe True to force this frame to be a keyframe
@@ -29,6 +46,17 @@ interface nsICastVideoEncoder : nsISupports
      * @return WebM cluster containing the encoded frame
      */
     Array<octet> encodeFrame(in Array<octet> rgbaData, in boolean forceKeyframe, in long long timestampMs);
+
+    /**
+     * Write an Opus audio frame to the WebM stream.
+     * Requires initWithAudio() to have been called.
+     * @param opusData Opus-encoded audio data
+     * @param timestampMs Timestamp in milliseconds from stream start
+     * @param durationSamples Duration in samples (e.g., 960 for 20ms at 48kHz)
+     * @return WebM cluster containing the audio frame
+     */
+    Array<octet> writeAudioFrame(in Array<octet> opusData, in long long timestampMs,
+                                 in unsigned long long durationSamples);
 
     /**
      * Get the WebM header that must be sent before any frames.

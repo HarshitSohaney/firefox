@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+pub mod audio_encoder;
 pub mod cast_device;
 pub mod constants;
 pub mod handlers;
@@ -48,5 +49,18 @@ pub unsafe extern "C" fn NS_NewCastVideoEncoder(
     }
 
     let encoder = video_encoder::CastVideoEncoder::new();
+    encoder.QueryInterface(iid, result)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn NS_NewCastAudioEncoder(
+    iid: &xpcom::nsIID,
+    result: *mut *mut libc::c_void,
+) -> nserror::nsresult {
+    if result.is_null() {
+        return nserror::NS_ERROR_NULL_POINTER;
+    }
+
+    let encoder = audio_encoder::CastAudioEncoder::new();
     encoder.QueryInterface(iid, result)
 }

@@ -148,7 +148,10 @@ var CastPanel = {
 
     const browser = gBrowser.selectedBrowser;
     gCastService
-      .startTabCasting(deviceId, browser, window, { fps: 30, bitrate: 15000000 })
+      .startTabCasting(deviceId, browser, window, {
+        fps: 30,
+        bitrate: 15000000,
+      })
       .then(() => {
         console.warn("CastPanel: Casting started successfully");
         this.updateActiveSession();

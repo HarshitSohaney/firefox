@@ -8,6 +8,9 @@ with Files("**"):
 JAR_MANIFESTS += ["jar.mn"]
 
 XPIDL_SOURCES += [
+    "nsICastAudioCapture.idl",
+    "nsICastAudioCaptureCallback.idl",
+    "nsICastAudioEncoder.idl",
     "nsICastDevice.idl",
     "nsICastVideoEncoder.idl",
 ]
@@ -31,10 +34,13 @@ EXTRA_JS_MODULES.cast = [
 ]
 
 UNIFIED_SOURCES += [
+    "src/audio_capture.cpp",
+    "src/opus_encoder_bridge.cpp",
     "src/webm_writer_bridge.cpp",
 ]
 
 LOCAL_INCLUDES += [
+    "/dom/media",
     "/dom/media/encoder",
     "/dom/media/webm",
 ]

@@ -1,0 +1,21 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+/**
+ * Callback interface for receiving audio samples from Cast audio capture.
+ */
+[scriptable, function, uuid(c3d4e5f6-789a-bcde-f012-3456789abcde)]
+interface nsICastAudioCaptureCallback : nsISupports
+{
+    /**
+     * Called when audio samples are available.
+     * @param pcmData Interleaved float32 PCM samples (stereo)
+     * @param timestampMs Timestamp in milliseconds from capture start
+     * @param sampleCount Number of samples per channel
+     */
+    void onAudioSamples(in Array<octet> pcmData, in long long timestampMs,
+                        in unsigned long sampleCount);
+};

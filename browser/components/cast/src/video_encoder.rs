@@ -26,6 +26,7 @@ struct EncoderState {
     height: u32,
     frame_count: u64,
     fps: u32,
+    audio_enabled: bool,
 }
 
 /// vp8 encoder context with image buffer for frame data.
@@ -46,6 +47,7 @@ impl CastVideoEncoder {
                 height: 0,
                 frame_count: 0,
                 fps: 15,
+                audio_enabled: false,
             }),
         })
     }
@@ -181,6 +183,171 @@ impl CastVideoEncoder {
     }
 
     /// Encode a single RGBA frame to vp8 and wrap in WebM cluster.
+    xpcom_method!(init_with_audio => InitWithAudio(width: u32, height: u32, bitrate: u32, fps: u32, audio_channels: u32, audio_sample_rate: u32, audio_preskip: u16));
+    fn init_with_audio(
+        &self,
+        width: u32,
+        height: u32,
+        bitrate: u32,
+        fps: u32,
+        audio_channels: u32,
+        audio_sample_rate: u32,
+        audio_preskip: u16,
+    ) -> Result<(), nsresult> {
+        let mut state = self.state.borrow_mut();
+
+        unsafe {
+            let iface = vpx_codec_vp8_cx();
+            if iface.is_null() {
+                return Err(nserror::NS_ERROR_FAILURE);
+            }
+
+            let mut cfg: Box<vpx_codec_enc_cfg_t> = Box::new(std::mem::zeroed());
+            let ret = vpx_codec_enc_config_default(iface, cfg.as_mut(), 0);
+            if ret != VPX_CODEC_OK {
+                return Err(nserror::NS_ERROR_FAILURE);
+            }
+
+            cfg.g_w = width;
+            cfg.g_h = height;
+            cfg.g_timebase.num = 1;
+            cfg.g_timebase.den = 1000;
+            cfg.rc_target_bitrate = bitrate / 1000;
+            cfg.g_error_resilient = 1;
+            cfg.g_lag_in_frames = 0;
+            cfg.g_threads = 4;
+            cfg.rc_end_usage = VPX_VBR;
+            cfg.rc_min_quantizer = 4;
+            cfg.rc_max_quantizer = 48;
+            cfg.kf_mode = VPX_KF_AUTO;
+            cfg.kf_max_dist = fps * 5;
+
+            let mut ctx: Box<vpx_codec_ctx> = Box::new(std::mem::zeroed());
+
+            let flags = 0;
+            let ret = vpx_codec_enc_init_ver(
+                ctx.as_mut(),
+                iface,
+                cfg.as_ref(),
+                flags,
+                VPX_ENCODER_ABI_VERSION,
+            );
+            if ret != VPX_CODEC_OK {
+                return Err(nserror::NS_ERROR_FAILURE);
+            }
+
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_CPUUSED, 4);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_STATIC_THRESHOLD, 0);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_TOKEN_PARTITIONS, 2);
+            vpx_codec_control(ctx.as_mut(), VP8E_SET_NOISE_SENSITIVITY, 0);
+
+            let aligned = |v: u32, a: usize| -> usize {
+                let v = v as usize;
+                if v < a {
+                    a
+                } else {
+                    (((v - 1) / a) + 1) * a
+                }
+            };
+
+            let y_stride = aligned(width, I420_STRIDE_ALIGN);
+            let y_size = y_stride * height as usize;
+            let buffer_size = y_size * 3;
+
+            let mut img_buffer = vec![0u8; buffer_size];
+
+            let mut img: vpx_image_t = std::mem::zeroed();
+            let img_ptr = vpx_img_wrap(
+                &mut img as *mut vpx_image_t,
+                VPX_IMG_FMT_I420,
+                width,
+                height,
+                I420_STRIDE_ALIGN as c_uint,
+                img_buffer.as_mut_ptr(),
+            );
+
+            if img_ptr.is_null() {
+                vpx_codec_destroy(ctx.as_mut());
+                return Err(nserror::NS_ERROR_OUT_OF_MEMORY);
+            }
+
+            let actual_y_stride = img.stride[0] as usize;
+            let u_stride = img.stride[1] as usize;
+            let v_stride = img.stride[2] as usize;
+            let y_plane_size = actual_y_stride * height as usize;
+            let uv_height = ((height + 1) / 2) as usize;
+            let u_plane_size = u_stride * uv_height;
+            let v_plane_size = v_stride * uv_height;
+
+            let y_plane = std::slice::from_raw_parts_mut(img.planes[0], y_plane_size);
+            let u_plane = std::slice::from_raw_parts_mut(img.planes[1], u_plane_size);
+            let v_plane = std::slice::from_raw_parts_mut(img.planes[2], v_plane_size);
+            for byte in y_plane.iter_mut() {
+                *byte = 16;
+            }
+            for byte in u_plane.iter_mut() {
+                *byte = 128;
+            }
+            for byte in v_plane.iter_mut() {
+                *byte = 128;
+            }
+
+            let vpx_ctx = VpxContext {
+                ctx,
+                img,
+                img_buffer,
+            };
+            state.vpx_ctx = Some(vpx_ctx);
+
+            let muxer = WebMWriter::new_with_audio(
+                width as i32,
+                height as i32,
+                audio_channels,
+                audio_sample_rate,
+                audio_preskip,
+            )
+            .map_err(|_| nserror::NS_ERROR_FAILURE)?;
+
+            let header = muxer.get_header().map_err(|_| nserror::NS_ERROR_FAILURE)?;
+            state.cached_header = header;
+            state.muxer = Some(muxer);
+            state.width = width;
+            state.height = height;
+            state.fps = fps;
+            state.audio_enabled = true;
+        }
+
+        Ok(())
+    }
+
+    xpcom_method!(write_audio_frame => WriteAudioFrame(opus_data: *const ThinVec<u8>, timestamp_ms: i64, duration_samples: u64) -> ThinVec<u8>);
+    fn write_audio_frame(
+        &self,
+        opus_data: &ThinVec<u8>,
+        timestamp_ms: i64,
+        duration_samples: u64,
+    ) -> Result<ThinVec<u8>, nsresult> {
+        let state = self.state.borrow();
+
+        if !state.audio_enabled {
+            return Err(nserror::NS_ERROR_NOT_INITIALIZED);
+        }
+
+        let muxer = state
+            .muxer
+            .as_ref()
+            .ok_or(nserror::NS_ERROR_NOT_INITIALIZED)?;
+
+        let timestamp_us = timestamp_ms * 1000;
+        let webm_cluster = muxer
+            .write_audio_frame(opus_data, timestamp_us, duration_samples)
+            .map_err(|_| nserror::NS_ERROR_FAILURE)?;
+
+        let mut result = ThinVec::with_capacity(webm_cluster.len());
+        result.extend_from_slice(&webm_cluster);
+        Ok(result)
+    }
+
     ///
     /// Frame Encoding Pipeline:
     /// 1. Input: RGBA pixels (width * height * 4 bytes)
@@ -411,7 +578,12 @@ impl Drop for VpxContext {
     }
 }
 
-fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) -> Result<(), nsresult> {
+fn rgba_to_i420(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    img: &mut vpx_image_t,
+) -> Result<(), nsresult> {
     unsafe {
         if img.planes[0].is_null() || img.planes[1].is_null() || img.planes[2].is_null() {
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);

@@ -5,9 +5,47 @@
 
 #include "WebMWriter.h"
 #include "EncodedFrame.h"
+#include "OpusTrackEncoder.h"
 #include "mozilla/media/MediaUtils.h"
+#include <cstring>
 
 using namespace mozilla;
+
+namespace {
+
+template <typename T>
+static void SerializeToBuffer(T aValue, nsTArray<uint8_t>* aOutput) {
+  for (uint32_t i = 0; i < sizeof(T); i++) {
+    aOutput->AppendElement((uint8_t)(0x000000ff & (aValue >> (i * 8))));
+  }
+}
+
+static void SerializeOpusIdHeader(uint8_t aChannelCount, uint16_t aPreskip,
+                                  uint32_t aInputSampleRate,
+                                  nsTArray<uint8_t>* aOutput) {
+  constexpr uint8_t magic[] = "OpusHead";
+  aOutput->AppendElements(magic, sizeof(magic) - 1);
+  aOutput->AppendElement(1);  // version
+  aOutput->AppendElement(aChannelCount);
+  SerializeToBuffer(aPreskip, aOutput);
+  SerializeToBuffer(aInputSampleRate, aOutput);
+  SerializeToBuffer((int16_t)0, aOutput);  // output gain
+  aOutput->AppendElement(0);               // channel mapping family
+}
+
+static void SerializeOpusCommentHeader(nsTArray<uint8_t>* aOutput) {
+  constexpr uint8_t magic[] = "OpusTags";
+  aOutput->AppendElements(magic, sizeof(magic) - 1);
+  // Vendor string: "Mozilla"
+  const char* vendor = "Mozilla";
+  uint32_t vendorLen = strlen(vendor);
+  SerializeToBuffer(vendorLen, aOutput);
+  aOutput->AppendElements(reinterpret_cast<const uint8_t*>(vendor), vendorLen);
+  // No comments
+  SerializeToBuffer((uint32_t)0, aOutput);
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -67,6 +105,18 @@ nsresult NS_NewVP8Metadata(int32_t aWidth, int32_t aHeight,
   return NS_OK;
 }
 
+nsresult NS_NewOpusMetadata(uint32_t aChannels, uint32_t aSamplingFrequency,
+                            uint16_t aPreskip, void** aResult) {
+  auto metadata = MakeRefPtr<OpusMetadata>();
+  metadata->mChannels = aChannels;
+  metadata->mSamplingFrequency = static_cast<float>(aSamplingFrequency);
+  SerializeOpusIdHeader(static_cast<uint8_t>(aChannels), aPreskip,
+                        aSamplingFrequency, &metadata->mIdHeader);
+  SerializeOpusCommentHeader(&metadata->mCommentHeader);
+  metadata.forget(reinterpret_cast<OpusMetadata**>(aResult));
+  return NS_OK;
+}
+
 void TrackMetadataBase_AddRef(void* aMetadata) {
   static_cast<TrackMetadataBase*>(aMetadata)->AddRef();
 }
@@ -87,6 +137,8 @@ nsresult NS_NewEncodedFrame(int64_t aTimeUs, uint64_t aDuration,
     frameType = EncodedFrame::VP8_I_FRAME;
   } else if (aFrameType == 1) {
     frameType = EncodedFrame::VP8_P_FRAME;
+  } else if (aFrameType == 2) {
+    frameType = EncodedFrame::OPUS_AUDIO_FRAME;
   } else {
     return NS_ERROR_INVALID_ARG;
   }

@@ -46,6 +46,8 @@ FINAL_TARGET_FILES.actors += [
     "BlockedSiteParent.sys.mjs",
     "BrowserProcessChild.sys.mjs",
     "BrowserTabChild.sys.mjs",
+    "CastAudioCaptureChild.sys.mjs",
+    "CastAudioCaptureParent.sys.mjs",
     "ClickHandlerChild.sys.mjs",
     "ClickHandlerParent.sys.mjs",
     "ContentSearchChild.sys.mjs",

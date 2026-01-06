@@ -1,0 +1,58 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+/**
+ * Cast audio encoder using Opus codec.
+ * Encodes PCM audio samples to Opus format for WebM muxing.
+ */
+[scriptable, uuid(a1b2c3d4-5678-9abc-def0-123456789abc)]
+interface nsICastAudioEncoder : nsISupports
+{
+    /**
+     * Initialize the encoder.
+     * @param sampleRate Input sample rate in Hz (will resample to 48kHz if needed)
+     * @param channels Number of channels (1 or 2)
+     * @param bitrate Target bitrate in bits per second
+     */
+    void init(in unsigned long sampleRate, in unsigned long channels,
+              in unsigned long bitrate);
+
+    /**
+     * Encode PCM audio samples.
+     * @param pcmData Interleaved float32 PCM samples
+     * @param timestampMs Timestamp in milliseconds from stream start
+     * @return Opus encoded data (empty if not enough samples for a frame)
+     */
+    Array<octet> encodeFrame(in Array<octet> pcmData, in long long timestampMs);
+
+    /**
+     * Flush any remaining buffered samples.
+     * @param timestampMs Final timestamp in milliseconds
+     * @return Opus encoded data for remaining samples
+     */
+    Array<octet> flush(in long long timestampMs);
+
+    /**
+     * Get the encoder lookahead (pre-skip) in samples at 48kHz.
+     * This value is needed for WebM Opus metadata.
+     */
+    readonly attribute unsigned long lookahead;
+
+    /**
+     * Get the number of channels.
+     */
+    readonly attribute unsigned long channels;
+
+    /**
+     * Get the output sample rate (always 48000 for Opus).
+     */
+    readonly attribute unsigned long sampleRate;
+
+    /**
+     * Shutdown the encoder and free resources.
+     */
+    void shutdown();
+};

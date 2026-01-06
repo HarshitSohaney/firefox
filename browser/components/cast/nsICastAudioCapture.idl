@@ -1,0 +1,52 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface nsICastAudioCaptureCallback;
+
+/**
+ * Audio capture component for Cast.
+ * Captures audio from a browser window using AudioCaptureTrack.
+ */
+[scriptable, uuid(b2c3d4e5-6789-abcd-ef01-23456789abcd)]
+interface nsICastAudioCapture : nsISupports
+{
+    /**
+     * Initialize audio capture for a window by its inner window ID.
+     * @param windowId The inner window ID to capture audio from
+     */
+    void init(in unsigned long long windowId);
+
+    /**
+     * Set the callback for receiving audio samples.
+     * @param callback The callback to receive audio data
+     */
+    void setCallback(in nsICastAudioCaptureCallback callback);
+
+    /**
+     * Start capturing audio.
+     */
+    void start();
+
+    /**
+     * Stop capturing audio.
+     */
+    void stop();
+
+    /**
+     * Check if currently capturing.
+     */
+    readonly attribute boolean capturing;
+
+    /**
+     * Get the sample rate of captured audio (always 48000).
+     */
+    readonly attribute unsigned long sampleRate;
+
+    /**
+     * Get the number of channels (always 2 for stereo).
+     */
+    readonly attribute unsigned long channels;
+};

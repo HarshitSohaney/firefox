@@ -54,6 +54,20 @@ export class CastSession {
     this._lastEncodedTimestamp = 0;
     this._playbackStartedTime = 0;
     this._initialLagMs = 0;
+
+    this._audioEncoder = null;
+    this._audioCaptureActor = null;
+    this._audioEnabled = true;
+    this._droppedAudioFrames = 0;
+    this._audioFrameCount = 0;
+
+    // Audio buffer for synchronized muxing
+    this._audioBuffer = [];
+    this._audioSamplesSent = 0;
+    this._audioInitialized = false;
+
+    // Centralized encoding state - when paused, neither audio nor video is sent
+    this._encodingPaused = false;
   }
 
   /**
@@ -137,12 +151,38 @@ export class CastSession {
       this._encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
         Ci.nsICastVideoEncoder
       );
-      this._encoder.init(
-        canvasWidth,
-        canvasHeight,
-        this.bitrate,
-        this.fps
-      );
+
+      if (this._audioEnabled) {
+        this._audioEncoder = Cc[
+          "@mozilla.org/cast/audio-encoder;1"
+        ].createInstance(Ci.nsICastAudioEncoder);
+        const audioBitrate = 128000;
+        const audioSampleRate = 48000;
+        const audioChannels = 2;
+        this._audioEncoder.init(audioSampleRate, audioChannels, audioBitrate);
+
+        const preskip = this._audioEncoder.lookahead;
+        this._encoder.initWithAudio(
+          canvasWidth,
+          canvasHeight,
+          this.bitrate,
+          this.fps,
+          audioChannels,
+          audioSampleRate,
+          preskip
+        );
+
+        lazy.logConsole.debug(
+          `Audio encoder initialized: ${audioChannels}ch@${audioSampleRate}Hz, preskip=${preskip}`
+        );
+      } else {
+        this._encoder.init(
+          canvasWidth,
+          canvasHeight,
+          this.bitrate,
+          this.fps
+        );
+      }
 
       this._webmHeader = this._encoder.getHeader();
       this._frameCount = 0;
@@ -255,7 +295,9 @@ export class CastSession {
       this.streamConnection = connection;
       this._frameCount = 0;
 
-      lazy.logConsole.debug("Cast device connected, starting capture immediately");
+      lazy.logConsole.debug(
+        "Cast device connected, starting capture immediately"
+      );
       this.startCaptureLoop();
     } catch (e) {
       lazy.logConsole.error("Error in handleStreamRequest:", e);
@@ -307,6 +349,16 @@ export class CastSession {
       `Both stream connection and MEDIA_STATUS ready! Starting capture at: ${this._streamStartTime}`
     );
 
+    lazy.logConsole.debug(
+      `Audio enabled: ${this._audioEnabled}, encoder: ${!!this._audioEncoder}`
+    );
+    if (this._audioEnabled && this._audioEncoder) {
+      lazy.logConsole.debug("Starting audio capture...");
+      this.startAudioCapture();
+    } else {
+      lazy.logConsole.warn("Audio capture NOT started - disabled or no encoder");
+    }
+
     const intervalMs = 1000 / this.fps;
     lazy.logConsole.debug(
       `Started capture loop at ${this.fps} FPS (interval: ${intervalMs}ms)`
@@ -330,6 +382,155 @@ export class CastSession {
     };
 
     this.captureInterval = this.window.requestAnimationFrame(captureLoop);
+  }
+
+  async startAudioCapture() {
+    lazy.logConsole.debug("startAudioCapture: Beginning audio capture setup");
+    try {
+      // Enable audioCapture media source and bypass permission prompts
+      Services.prefs.setBoolPref(
+        "media.getusermedia.audio.capture.enabled",
+        true
+      );
+      Services.prefs.setBoolPref("media.navigator.permission.disabled", true);
+
+      const windowGlobal = this.browser.browsingContext?.currentWindowGlobal;
+      if (!windowGlobal) {
+        lazy.logConsole.warn("No currentWindowGlobal for audio capture");
+        return;
+      }
+
+      lazy.logConsole.debug("startAudioCapture: Getting CastAudioCapture actor");
+      this._audioCaptureActor = windowGlobal.getActor("CastAudioCapture");
+      this._audioCaptureActor.setAudioCallback(samples => {
+        this.handleAudioData(samples);
+      });
+
+      lazy.logConsole.debug("startAudioCapture: Sending Start query");
+      const result = await this._audioCaptureActor.sendQuery(
+        "CastAudioCapture:Start"
+      );
+
+      if (!result.success) {
+        lazy.logConsole.error("Failed to start audio capture:", result.error);
+        this._audioCaptureActor = null;
+        return;
+      }
+
+      lazy.logConsole.debug(
+        `Audio capture started: ${result.sampleRate}Hz, callback set: ${!!this._audioCaptureActor}`
+      );
+    } catch (e) {
+      lazy.logConsole.error("Failed to start audio capture:", e);
+      this._audioCaptureActor = null;
+    }
+  }
+
+  handleAudioData(samples) {
+    if (!this._streamStartTime) {
+      return;
+    }
+
+    this._audioBuffer.push({
+      samples: new Float32Array(samples),
+    });
+
+    this._audioFrameCount++;
+    if (this._audioFrameCount % 100 === 1) {
+      lazy.logConsole.debug(
+        `Audio received: frame ${this._audioFrameCount}, buffer size ${this._audioBuffer.length}, samples ${samples.length}`
+      );
+    }
+  }
+
+  processBufferedAudio(videoTimestampMs) {
+    if (!this._audioEncoder || !this._encoder || !this.streamConnection) {
+      lazy.logConsole.warn("processBufferedAudio: missing encoder or connection");
+      return;
+    }
+
+    const OPUS_FRAME_SAMPLES = 960;
+    const SAMPLE_RATE = 48000;
+
+    // Initialize audio time to match video on first call
+    if (!this._audioInitialized) {
+      this._audioSamplesSent = Math.floor((videoTimestampMs / 1000) * SAMPLE_RATE);
+      this._audioInitialized = true;
+      lazy.logConsole.debug(
+        `Audio initialized at ${videoTimestampMs}ms (${this._audioSamplesSent} samples)`
+      );
+    }
+
+    // If no audio buffered, send silent frame to keep stream flowing
+    if (this._audioBuffer.length === 0) {
+      this.sendAudioFrame(null, OPUS_FRAME_SAMPLES, SAMPLE_RATE);
+      return;
+    }
+
+    // Process all buffered audio with monotonic timestamps
+    const bufferSize = this._audioBuffer.length;
+    while (this._audioBuffer.length) {
+      const audioChunk = this._audioBuffer.shift();
+      this.sendAudioFrame(audioChunk.samples, OPUS_FRAME_SAMPLES, SAMPLE_RATE);
+    }
+    if (this._frameCount % 60 === 0) {
+      lazy.logConsole.debug(`Processed ${bufferSize} audio chunks at video ts ${videoTimestampMs}ms`);
+    }
+  }
+
+  sendAudioFrame(samples, frameSamples, sampleRate) {
+    if (!this._audioEncoder || !this._encoder || !this.streamConnection) {
+      return;
+    }
+
+    try {
+      // Calculate timestamp from samples sent (monotonic)
+      const timestampMs = (this._audioSamplesSent / sampleRate) * 1000;
+
+      // Use provided samples or create silence
+      let pcmBytes;
+      if (samples) {
+        pcmBytes = new Uint8Array(samples.buffer);
+      } else {
+        const silentPcm = new Float32Array(frameSamples * 2);
+        pcmBytes = new Uint8Array(silentPcm.buffer);
+      }
+
+      const opusData = this._audioEncoder.encodeFrame(
+        Array.from(pcmBytes),
+        timestampMs
+      );
+
+      if (opusData && opusData.length) {
+        const webmCluster = this._encoder.writeAudioFrame(
+          opusData,
+          timestampMs,
+          frameSamples
+        );
+
+        if (webmCluster && webmCluster.length) {
+          this.writeChunk(this.streamConnection.outputStream, webmCluster);
+          if (this._audioSamplesSent % (sampleRate * 2) < frameSamples) {
+            lazy.logConsole.debug(
+              `Audio sent: ts=${timestampMs.toFixed(0)}ms, opus=${opusData.length}B, cluster=${webmCluster.length}B`
+            );
+          }
+        }
+
+        // Increment samples sent for next frame's timestamp
+        this._audioSamplesSent += frameSamples;
+      } else if (this._audioSamplesSent === 0) {
+        lazy.logConsole.warn("Audio encode returned empty data");
+      }
+    } catch (e) {
+      lazy.logConsole.error("Error encoding audio:", e);
+    }
+  }
+
+  sendSilentAudioFrame() {
+    const OPUS_FRAME_SAMPLES = 960;
+    const SAMPLE_RATE = 48000;
+    this.sendAudioFrame(null, OPUS_FRAME_SAMPLES, SAMPLE_RATE);
   }
 
   onPlaybackStarted(castCurrentTime) {
@@ -388,6 +589,15 @@ export class CastSession {
     return this._measuredLagMs || 0;
   }
 
+  isAheadOfReceiver(maxLagMs) {
+    if (!this._streamStartTime) {
+      return false;
+    }
+    const timestampMs = Date.now() - this._streamStartTime;
+    const receiverTimeMs = this.getEstimatedReceiverTime() * 1000;
+    return timestampMs - receiverTimeMs > maxLagMs;
+  }
+
   async captureFrame() {
     if (!this.browser || !this._encoder || !this.canvas) {
       return;
@@ -427,6 +637,33 @@ export class CastSession {
         this._initialLagMs = 0;
         this._forceKeyframe = true;
         this._playbackStartedTime = Date.now(); // Reset grace period
+      }
+    }
+
+    // Centralized pause check - affects both audio and video
+    if (this._playbackStarted) {
+      const shouldPause =
+        this._receiverBuffering || this.isAheadOfReceiver(1000);
+
+      if (shouldPause && !this._encodingPaused) {
+        // Transitioning to paused - clear audio buffer so we start fresh
+        this._encodingPaused = true;
+        this._audioBuffer = [];
+        lazy.logConsole.debug("Encoding paused (buffering/lag)");
+      } else if (!shouldPause && this._encodingPaused) {
+        // Transitioning to unpaused
+        this._encodingPaused = false;
+        this._forceKeyframe = true;
+        lazy.logConsole.debug("Encoding resumed");
+      }
+ 
+      if (this._encodingPaused) {
+         this._droppedFrames++;
+        // Still send silent audio to keep Cast device happy
+        if (this._audioEnabled && this._audioInitialized) {
+          this.sendSilentAudioFrame();
+         }
+         return;
       }
     }
 
@@ -504,6 +741,11 @@ export class CastSession {
         } else {
           this._pendingFrames++;
           this.writeChunk(this.streamConnection.outputStream, webmCluster);
+
+          // Process buffered audio with video timestamp for sync
+          if (this._audioEnabled) {
+            this.processBufferedAudio(timestampMs);
+          }
         }
       }
 
@@ -544,6 +786,26 @@ export class CastSession {
       this.captureInterval = null;
     }
 
+    if (this._audioCaptureActor) {
+      try {
+        lazy.logConsole.debug("Stopping audio capture");
+        this._audioCaptureActor.sendAsyncMessage("CastAudioCapture:Stop");
+      } catch (e) {
+        lazy.logConsole.error("Error stopping audio capture:", e);
+      }
+      this._audioCaptureActor = null;
+    }
+
+    if (this._audioEncoder) {
+      try {
+        lazy.logConsole.debug("Shutting down audio encoder");
+        this._audioEncoder.shutdown();
+      } catch (e) {
+        lazy.logConsole.error("Error shutting down audio encoder:", e);
+      }
+      this._audioEncoder = null;
+    }
+
     if (this._encoder) {
       try {
         lazy.logConsole.debug("Shutting down encoder");
@@ -569,6 +831,12 @@ export class CastSession {
     this._lastEncodedTimestamp = 0;
     this._playbackStartedTime = 0;
     this._initialLagMs = 0;
+    this._droppedAudioFrames = 0;
+    this._audioBuffer = [];
+    this._audioFrameCount = 0;
+    this._audioSamplesSent = 0;
+    this._audioInitialized = false;
+    this._encodingPaused = false;
 
     if (this.tabCloseListener) {
       try {

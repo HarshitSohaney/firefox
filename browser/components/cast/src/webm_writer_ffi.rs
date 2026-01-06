@@ -49,6 +49,12 @@ extern "C" {
         display_height: i32,
         result: *mut *mut c_void,
     ) -> nsresult;
+    fn NS_NewOpusMetadata(
+        channels: u32,
+        sampling_frequency: u32,
+        preskip: u16,
+        result: *mut *mut c_void,
+    ) -> nsresult;
     fn TrackMetadataBase_AddRef(metadata: *mut c_void);
     fn TrackMetadataBase_Release(metadata: *mut c_void);
 
@@ -67,7 +73,9 @@ extern "C" {
 
 const VP8_I_FRAME: u32 = 0;
 const VP8_P_FRAME: u32 = 1;
+const OPUS_AUDIO_FRAME: u32 = 2;
 const GET_HEADER: u32 = 1 << 1;
+const OPUS_SAMPLE_RATE: u64 = 48000;
 
 pub struct WebMWriter {
     ptr: *mut c_void,
@@ -103,6 +111,58 @@ impl WebMWriter {
                 return Err(rv);
             }
 
+            Ok(WebMWriter { ptr: writer_ptr })
+        }
+    }
+
+    pub fn new_with_audio(
+        width: i32,
+        height: i32,
+        channels: u32,
+        sample_rate: u32,
+        preskip: u16,
+    ) -> Result<Self, nsresult> {
+        unsafe {
+            let mut writer_ptr: *mut c_void = std::ptr::null_mut();
+            let rv = NS_NewWebMWriter(&mut writer_ptr);
+            if rv != NS_OK {
+                return Err(rv);
+            }
+
+            let mut video_metadata_ptr: *mut c_void = std::ptr::null_mut();
+            let rv = NS_NewVP8Metadata(width, height, width, height, &mut video_metadata_ptr);
+            if rv != NS_OK {
+                WebMWriter_Release(writer_ptr);
+                return Err(rv);
+            }
+
+            let mut audio_metadata_ptr: *mut c_void = std::ptr::null_mut();
+            let rv = NS_NewOpusMetadata(channels, sample_rate, preskip, &mut audio_metadata_ptr);
+            if rv != NS_OK {
+                TrackMetadataBase_Release(video_metadata_ptr);
+                WebMWriter_Release(writer_ptr);
+                return Err(rv);
+            }
+
+            let metadata_array = [video_metadata_ptr, audio_metadata_ptr];
+            let rv = WebMWriter_SetMetadata(
+                writer_ptr,
+                metadata_array.as_ptr() as *const *const c_void,
+                2,
+            );
+
+            TrackMetadataBase_Release(video_metadata_ptr);
+            TrackMetadataBase_Release(audio_metadata_ptr);
+
+            if rv != NS_OK {
+                WebMWriter_Release(writer_ptr);
+                return Err(rv);
+            }
+
+            eprintln!(
+                "WebMWriter::new_with_audio: Created writer with video {}x{} and audio {}ch@{}Hz (preskip={})",
+                width, height, channels, sample_rate, preskip
+            );
             Ok(WebMWriter { ptr: writer_ptr })
         }
     }
@@ -201,6 +261,67 @@ impl WebMWriter {
                 cluster.len(),
                 is_keyframe
             );
+            Ok(cluster)
+        }
+    }
+
+    pub fn write_audio_frame(
+        &self,
+        data: &[u8],
+        timestamp_us: i64,
+        duration_samples: u64,
+    ) -> Result<Vec<u8>, nsresult> {
+        unsafe {
+            let mut frame_ptr: *mut c_void = std::ptr::null_mut();
+            let rv = NS_NewEncodedFrame(
+                timestamp_us,
+                duration_samples,
+                OPUS_SAMPLE_RATE,
+                OPUS_AUDIO_FRAME,
+                data.as_ptr(),
+                data.len(),
+                &mut frame_ptr,
+            );
+            if rv != NS_OK {
+                eprintln!(
+                    "WebMWriter::write_audio_frame: NS_NewEncodedFrame failed with rv={:?}",
+                    rv
+                );
+                return Err(rv);
+            }
+
+            let frames = [frame_ptr];
+            let rv = WebMWriter_WriteEncodedTrack(
+                self.ptr,
+                frames.as_ptr() as *const *const c_void,
+                1,
+                0,
+            );
+
+            EncodedFrame_Release(frame_ptr);
+
+            if rv != NS_OK {
+                eprintln!(
+                    "WebMWriter::write_audio_frame: WriteEncodedTrack failed with rv={:?}",
+                    rv
+                );
+                return Err(rv);
+            }
+
+            let mut output_bufs = ThinVec::<ThinVec<u8>>::new();
+            let rv = WebMWriter_GetContainerData(self.ptr, &mut output_bufs, 0);
+            if rv != NS_OK {
+                eprintln!(
+                    "WebMWriter::write_audio_frame: GetContainerData failed with rv={:?}",
+                    rv
+                );
+                return Err(rv);
+            }
+
+            let mut cluster = Vec::new();
+            for buf in output_bufs.iter() {
+                cluster.extend_from_slice(buf);
+            }
             Ok(cluster)
         }
     }
