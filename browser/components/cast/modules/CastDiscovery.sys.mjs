@@ -6,8 +6,10 @@ const lazy = {};
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
   return console.createInstance({
-    prefix: "CastDiscovery",
-    maxLogLevel: "Debug",
+    prefix: "Cast:Discovery",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
   });
 });
 

@@ -55,3 +55,16 @@ export const CAST_NAMESPACES = Object.freeze({
 export const DEFAULT_CAST_PORT = 8009;
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 5000;
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 10000;
+
+// HTTP streaming server configuration
+export const HTTP_STREAM_PORT = 8010;
+
+// Video encoding resolution constraints
+export const MIN_CAST_WIDTH = 1280;
+export const MIN_CAST_HEIGHT = 720;
+export const MAX_CAST_WIDTH = 1920;
+export const MAX_CAST_HEIGHT = 1080;
+
+// Lag compensation thresholds
+export const LAG_GRACE_PERIOD_MS = 4000;
+export const MAX_LAG_GROWTH_MS = 1000;

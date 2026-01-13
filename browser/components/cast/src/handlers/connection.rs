@@ -11,10 +11,10 @@ impl ConnectionHandler {
     pub const NAMESPACE: &'static str = namespaces::CONNECTION;
 
     pub fn create_connect_message() -> String {
-        serde_json::to_string(&ConnectionMessage::CONNECT).unwrap()
+        serde_json::to_string(&ConnectionMessage::CONNECT).expect("serializing ConnectionMessage")
     }
 
     pub fn create_close_message() -> String {
-        serde_json::to_string(&ConnectionMessage::CLOSE).unwrap()
+        serde_json::to_string(&ConnectionMessage::CLOSE).expect("serializing ConnectionMessage")
     }
 }

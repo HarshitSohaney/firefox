@@ -26,7 +26,6 @@ export class CastMediaHandler {
     this.castDevice = castDevice;
     this.requestId = 1;
     this.mediaSessionId = null;
-    this.pendingRequests = new Map();
   }
 
   getNextRequestId() {
@@ -84,14 +83,14 @@ export class CastMediaHandler {
    * @param {string} contentType MIME type (e.g., "video/webm")
    * @param {string} streamType "LIVE" or "BUFFERED"
    * @param {object} metadata Media metadata (title, etc.)
-   * @param {boolean} lowLatency Enable low-latency mode for live streams
+   * @param {boolean} _lowLatency Enable low-latency mode for live streams (not yet implemented)
    */
   async load(
     contentId,
     contentType,
     streamType = "LIVE",
     metadata = null,
-    lowLatency = false
+    _lowLatency = false
   ) {
     lazy.logConsole.debug(`Loading media: ${contentId}`);
     const media = {
@@ -203,6 +202,5 @@ export class CastMediaHandler {
 
   reset() {
     this.mediaSessionId = null;
-    this.pendingRequests.clear();
   }
 }

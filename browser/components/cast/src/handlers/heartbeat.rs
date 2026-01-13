@@ -11,11 +11,11 @@ impl HeartbeatHandler {
     pub const NAMESPACE: &'static str = namespaces::HEARTBEAT;
 
     pub fn create_ping() -> String {
-        serde_json::to_string(&HeartbeatMessage::PING).unwrap()
+        serde_json::to_string(&HeartbeatMessage::PING).expect("serializing HeartbeatMessage")
     }
 
     pub fn create_pong() -> String {
-        serde_json::to_string(&HeartbeatMessage::PONG).unwrap()
+        serde_json::to_string(&HeartbeatMessage::PONG).expect("serializing HeartbeatMessage")
     }
 
     pub fn handle_message(payload: &str) -> Option<String> {

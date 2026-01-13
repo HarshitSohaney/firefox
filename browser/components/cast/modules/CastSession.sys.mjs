@@ -3,6 +3,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { SimpleHTTPServer } from "resource:///modules/cast/SimpleHTTPServer.sys.mjs";
+import {
+  HTTP_STREAM_PORT,
+  MIN_CAST_WIDTH,
+  MIN_CAST_HEIGHT,
+  MAX_CAST_WIDTH,
+  MAX_CAST_HEIGHT,
+  LAG_GRACE_PERIOD_MS,
+  MAX_LAG_GROWTH_MS,
+} from "resource:///modules/cast/CastConstants.mjs";
 
 const lazy = {};
 
@@ -50,10 +59,10 @@ export class CastSession {
     this._forceKeyframe = false;
     this._lastReceiverTime = 0;
     this._lastReceiverUpdate = 0;
-    this._receiverBuffering = false;
     this._lastEncodedTimestamp = 0;
     this._playbackStartedTime = 0;
     this._initialLagMs = 0;
+    this._messageListener = null;
   }
 
   /**
@@ -77,10 +86,10 @@ export class CastSession {
       this.width = browser.clientWidth || 1280;
       this.height = browser.clientHeight || 720;
 
-      const minWidth = 1280;
-      const minHeight = 720;
-      const maxWidth = 1920;
-      const maxHeight = 1080;
+      const minWidth = MIN_CAST_WIDTH;
+      const minHeight = MIN_CAST_HEIGHT;
+      const maxWidth = MAX_CAST_WIDTH;
+      const maxHeight = MAX_CAST_HEIGHT;
       let canvasWidth = this.width;
       let canvasHeight = this.height;
 
@@ -137,12 +146,7 @@ export class CastSession {
       this._encoder = Cc["@mozilla.org/cast/video-encoder;1"].createInstance(
         Ci.nsICastVideoEncoder
       );
-      this._encoder.init(
-        canvasWidth,
-        canvasHeight,
-        this.bitrate,
-        this.fps
-      );
+      this._encoder.init(canvasWidth, canvasHeight, this.bitrate, this.fps);
 
       this._webmHeader = this._encoder.getHeader();
       this._frameCount = 0;
@@ -157,7 +161,7 @@ export class CastSession {
       this.server.registerPathHandler("/stream.webm", connection => {
         this.handleStreamRequest(connection);
       });
-      const port = this.server.start(8010);
+      const port = this.server.start(HTTP_STREAM_PORT);
 
       const hostname = this.server.getLocalHostname();
       const streamURL = hostname
@@ -180,11 +184,12 @@ export class CastSession {
 
       this.mediaHandler = new lazy.CastMediaHandler(this.castDevice);
 
-      this.castDevice.addEventListener("message", ({ namespace, payload }) => {
+      this._messageListener = ({ namespace, payload }) => {
         if (namespace === lazy.CastMediaHandler.NAMESPACE) {
           this.handleMediaMessage(JSON.stringify(payload));
         }
-      });
+      };
+      this.castDevice.addEventListener("message", this._messageListener);
 
       const metadata = {
         metadataType: 0,
@@ -255,7 +260,9 @@ export class CastSession {
       this.streamConnection = connection;
       this._frameCount = 0;
 
-      lazy.logConsole.debug("Cast device connected, starting capture immediately");
+      lazy.logConsole.debug(
+        "Cast device connected, starting capture immediately"
+      );
       this.startCaptureLoop();
     } catch (e) {
       lazy.logConsole.error("Error in handleStreamRequest:", e);
@@ -352,7 +359,7 @@ export class CastSession {
 
     // If we have significant startup lag, reinitialize the encoder
     // This creates a timestamp discontinuity that should make the receiver skip ahead
-    if (lagSec > 1 && this._encoder) {
+    if (lagSec > 0.5 && this._encoder) {
       lazy.logConsole.debug(
         `Reinitializing encoder to skip ${lagSec.toFixed(1)}s startup lag`
       );
@@ -399,8 +406,8 @@ export class CastSession {
 
     // Lag reduction: if lag has grown too much, resync by adjusting our clock to receiver's position
     // This effectively "skips" the accumulated lag and starts fresh
-    const gracePeriodMs = 4000;
-    const maxLagGrowthMs = 1000;
+    const gracePeriodMs = LAG_GRACE_PERIOD_MS;
+    const maxLagGrowthMs = MAX_LAG_GROWTH_MS;
     if (
       this._playbackStartedTime &&
       Date.now() - this._playbackStartedTime > gracePeriodMs &&
@@ -408,7 +415,7 @@ export class CastSession {
       this._initialLagMs !== undefined
     ) {
       const receiverTimeMs = this.getEstimatedReceiverTime() * 1000;
-      const currentLagMs = (Date.now() - this._streamStartTime) - receiverTimeMs;
+      const currentLagMs = Date.now() - this._streamStartTime - receiverTimeMs;
       const lagGrowthMs = currentLagMs - this._initialLagMs;
 
       if (lagGrowthMs > maxLagGrowthMs) {
@@ -419,7 +426,12 @@ export class CastSession {
         );
 
         // Reinitialize encoder (clears internal timestamp tracking)
-        this._encoder.init(this.canvas.width, this.canvas.height, this.bitrate, this.fps);
+        this._encoder.init(
+          this.canvas.width,
+          this.canvas.height,
+          this.bitrate,
+          this.fps
+        );
 
         // Reset our timestamp tracking to start fresh
         this._streamStartTime = Date.now();
@@ -565,10 +577,14 @@ export class CastSession {
     this._forceKeyframe = false;
     this._lastReceiverTime = 0;
     this._lastReceiverUpdate = 0;
-    this._receiverBuffering = false;
     this._lastEncodedTimestamp = 0;
     this._playbackStartedTime = 0;
     this._initialLagMs = 0;
+
+    if (this._messageListener) {
+      this.castDevice.removeEventListener("message", this._messageListener);
+      this._messageListener = null;
+    }
 
     if (this.tabCloseListener) {
       try {
@@ -624,10 +640,7 @@ export class CastSession {
           this.setState("error");
         }
 
-        if (status?.playerState === "BUFFERING") {
-          this._receiverBuffering = true;
-        } else if (status?.playerState === "PLAYING") {
-          this._receiverBuffering = false;
+        if (status?.playerState === "PLAYING") {
           if (this._streamStartTime) {
             if (!this._playbackStarted) {
               this.onPlaybackStarted(status.currentTime || 0);

@@ -3,129 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /**
- * Cast Protocol v2 Implementation Overview
- * =========================================
- *
- * This module implements the Google Cast Protocol v2 for casting content
- * to Cast-enabled devices (Chromecast, Android TV, smart displays, etc.).
- *
- * PROTOCOL ARCHITECTURE:
- * ----------------------
- * The implementation is split between Rust (low-level protocol) and
- * JavaScript (high-level session management):
- *
- * - Rust (cast_device.rs, stream_listener.rs):
- *   * TLS connection via nsISocketTransport
- *   * Protocol Buffer encoding/decoding
- *   * Message framing (4-byte length prefix)
- *   * Automatic PING/PONG heartbeat responses
- *   * App lifecycle management (LAUNCH, CONNECT to app)
- *
- * - JavaScript (this file):
- *   * Promise-based API wrapper over XPCOM
- *   * Event system for UI updates
- *   * Heartbeat timer initiation
- *   * High-level app and media control
- *
- * CAST PROTOCOL MESSAGE FORMAT:
- * -----------------------------
- * All messages are sent over TLS (port 8009) using this wire format:
- *
- * [4 bytes: message length (big-endian u32)]
- * [N bytes: Protocol Buffer encoded CastMessage]
- *
- * The CastMessage protobuf contains:
- * - protocol_version: Always 0 for Cast v2
- * - source_id: "sender-0" (our identifier)
- * - destination_id: "receiver-0" or app transport ID
- * - namespace: Protocol namespace (see NAMESPACES below)
- * - payload_type: 0 (String/JSON) or 1 (Binary)
- * - payload_utf8: JSON message payload
- *
- * CAST PROTOCOL NAMESPACES:
- * -------------------------
- * The protocol uses different namespaces for different operations:
- *
- * 1. CONNECTION (urn:x-cast:com.google.cast.tp.connection)
- *    - CONNECT: Establish virtual connection to receiver or app
- *    - CLOSE: Close virtual connection
- *    - Must CONNECT before using other namespaces
- *
- * 2. HEARTBEAT (urn:x-cast:com.google.cast.tp.heartbeat)
- *    - PING: Keepalive from sender (every 5 seconds)
- *    - PONG: Response from receiver
- *    - Device disconnects after ~30 seconds without PING
- *
- * 3. RECEIVER (urn:x-cast:com.google.cast.receiver)
- *    - GET_STATUS: Query receiver state
- *    - RECEIVER_STATUS: Response with running apps
- *    - LAUNCH: Start a receiver application
- *    - STOP: Stop a receiver application
- *    - LAUNCH_ERROR: Error response for failed launch
- *
- * 4. MEDIA (urn:x-cast:com.google.cast.media)
- *    - LOAD: Load and play media URL
- *    - PLAY: Resume playback
- *    - PAUSE: Pause playback
- *    - STOP: Stop playback
- *    - SEEK: Jump to specific time
- *    - MEDIA_STATUS: Status updates from device
- *
- * COMPLETE PROTOCOL FLOW FOR TAB CASTING:
- * ----------------------------------------
- * 1. TLS Connection:
- *    - Connect to device IP:8009 with TLS
- *    - Accept self-signed certificate
- *
- * 2. Initial Handshake:
- *    -> CONNECT (connection namespace, to receiver-0)
- *    <- CONNECTED
- *    -> GET_STATUS (receiver namespace)
- *    <- RECEIVER_STATUS (empty applications array)
- *
- * 3. Start Heartbeat:
- *    -> PING (heartbeat namespace, every 5 seconds)
- *    <- PONG (automatic response)
- *
- * 4. Launch App:
- *    -> LAUNCH (receiver namespace, appId: CC1AD845 = DefaultMediaReceiver)
- *    <- RECEIVER_STATUS (with app in applications array)
- *       - Parse app.sessionId (for STOP later)
- *       - Parse app.transportId (for media messages)
- *
- * 5. Connect to App:
- *    -> CONNECT (connection namespace, to app.transportId)
- *    <- CONNECTED
- *
- * 6. Load Media:
- *    -> LOAD (media namespace, to app.transportId)
- *       - contentId: HTTP URL to media stream
- *       - contentType: "video/webm"
- *       - streamType: "LIVE"
- *    <- MEDIA_STATUS (with mediaSessionId)
- *
- * 7. During Playback:
- *    <- MEDIA_STATUS (periodic updates with playerState, currentTime)
- *    -> PLAY/PAUSE/STOP (with mediaSessionId from LOAD response)
- *
- * 8. Cleanup:
- *    -> STOP (media namespace)
- *    -> STOP (receiver namespace, with sessionId)
- *    -> CLOSE (connection namespace, to app.transportId)
- *    -> CLOSE (connection namespace, to receiver-0)
- *    - Close TLS connection
- *
- * MESSAGE ROUTING:
- * ---------------
- * - Messages to receiver-0: Receiver control (LAUNCH, STOP, GET_STATUS)
- * - Messages to app transport ID: Media control (LOAD, PLAY, PAUSE)
- * - The Rust code automatically routes media messages to the correct destination
- *
- * For more details, see:
- * - ARCHITECTURE.md: Overall system architecture
- * - src/message.rs: Protocol Buffer definitions
- * - src/cast_device.rs: Message sending implementation
- * - src/stream_listener.rs: Message receiving and parsing
+ * JavaScript wrapper for the Rust XPCOM Cast protocol implementation.
  */
 
 import {
@@ -417,15 +295,20 @@ export class CastDevice {
           JSON.stringify({ type: "PING" })
         );
       } catch (error) {
-        console.error("Cast heartbeat failed:", error);
+        lazy.logConsole.error("Cast heartbeat failed:", error);
       }
     }, DEFAULT_HEARTBEAT_INTERVAL_MS);
   }
 
-  disconnect() {
+  async disconnect() {
     lazy.logConsole.debug(`Disconnecting from ${this.address}:${this.port}`);
 
+    const hadSession = !!this._xpcomDevice.getAppSessionId();
     this.stopApp();
+
+    if (hadSession) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     if (this._heartbeatTimer) {
       clearInterval(this._heartbeatTimer);
@@ -566,7 +449,7 @@ export class CastDevice {
         try {
           listener(data);
         } catch (error) {
-          console.error("Cast event listener error:", error);
+          lazy.logConsole.error("Cast event listener error:", error);
         }
       }
     }

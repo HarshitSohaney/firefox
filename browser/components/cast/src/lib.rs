@@ -17,6 +17,7 @@ pub use handlers::{ConnectionHandler, HeartbeatHandler, ReceiverHandler};
 pub use message::CastMessage;
 pub use state::DeviceState;
 
+// Debug output: Use MOZ_LOG=cast:5 for production logging instead of println!
 #[no_mangle]
 pub unsafe extern "C" fn NS_NewCastDevice(
     iid: &xpcom::nsIID,

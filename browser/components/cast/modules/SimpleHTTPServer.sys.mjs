@@ -2,6 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+const lazy = {};
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", function () {
+  return console.createInstance({
+    prefix: "Cast:HTTPServer",
+    maxLogLevel: Services.prefs.getBoolPref("browser.cast.log", false)
+      ? "Debug"
+      : "Warn",
+  });
+});
+
 /**
  * Minimal HTTP server for streaming video to Cast devices.
  * Supports chunked transfer encoding and CORS headers.
@@ -41,7 +52,10 @@ export class SimpleHTTPServer {
         Services.tm.mainThread
       );
     } catch (e) {
-      console.error("SimpleHTTPServer: Error setting up connection:", e);
+      lazy.logConsole.error(
+        "SimpleHTTPServer: Error setting up connection:",
+        e
+      );
       this.closeConnection(connection);
     }
   }
@@ -82,7 +96,7 @@ export class SimpleHTTPServer {
         this.send404(connection);
       }
     } catch (e) {
-      console.error("SimpleHTTPServer: Error handling request:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Error handling request:", e);
       this.closeConnection(connection);
     }
   }
@@ -114,7 +128,7 @@ export class SimpleHTTPServer {
 
       return this.port;
     } catch (e) {
-      console.error("SimpleHTTPServer: Failed to start server:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Failed to start server:", e);
       throw e;
     }
   }
@@ -132,7 +146,10 @@ export class SimpleHTTPServer {
       connection.outputStream.write(response, response.length);
       this.closeConnection(connection);
     } catch (e) {
-      console.error("SimpleHTTPServer: Error sending OPTIONS response:", e);
+      lazy.logConsole.error(
+        "SimpleHTTPServer: Error sending OPTIONS response:",
+        e
+      );
     }
   }
 
@@ -151,7 +168,10 @@ export class SimpleHTTPServer {
       connection.outputStream.write(response, response.length);
       this.closeConnection(connection);
     } catch (e) {
-      console.error("SimpleHTTPServer: Error sending HEAD response:", e);
+      lazy.logConsole.error(
+        "SimpleHTTPServer: Error sending HEAD response:",
+        e
+      );
     }
   }
 
@@ -161,7 +181,7 @@ export class SimpleHTTPServer {
       connection.outputStream.write(response, response.length);
       this.closeConnection(connection);
     } catch (e) {
-      console.error("SimpleHTTPServer: Error sending 404:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Error sending 404:", e);
     }
   }
 
@@ -175,7 +195,7 @@ export class SimpleHTTPServer {
       }
       this.activeConnections.delete(connection);
     } catch (e) {
-      console.error("SimpleHTTPServer: Error closing connection:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Error closing connection:", e);
     }
   }
 
@@ -198,11 +218,11 @@ export class SimpleHTTPServer {
         if (!hostname.endsWith(".local")) {
           hostname += ".local";
         }
-        console.warn(`SimpleHTTPServer: Got hostname: ${hostname}`);
+        lazy.logConsole.debug(`SimpleHTTPServer: Got hostname: ${hostname}`);
         return hostname;
       }
     } catch (e) {
-      console.error("SimpleHTTPServer: Error getting hostname:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Error getting hostname:", e);
     }
 
     return null;
@@ -230,29 +250,33 @@ export class SimpleHTTPServer {
                 castParts[1] === localParts[1] &&
                 castParts[2] === localParts[2]
               ) {
-                console.warn(`SimpleHTTPServer: Found same-subnet IP: ${ip}`);
+                lazy.logConsole.debug(
+                  `SimpleHTTPServer: Found same-subnet IP: ${ip}`
+                );
                 return ip;
               }
             }
-            console.warn(`SimpleHTTPServer: Using IP: ${ip}`);
+            lazy.logConsole.debug(`SimpleHTTPServer: Using IP: ${ip}`);
             return ip;
           }
         } catch (e) {
-          console.warn("SimpleHTTPServer: DNS resolve failed:", e);
+          lazy.logConsole.debug("SimpleHTTPServer: DNS resolve failed:", e);
         }
       }
     } catch (e) {
-      console.error("SimpleHTTPServer: Error getting local IP:", e);
+      lazy.logConsole.error("SimpleHTTPServer: Error getting local IP:", e);
     }
 
     if (castDeviceIP) {
       const parts = castDeviceIP.split(".");
       if (parts.length === 4) {
-        console.warn("SimpleHTTPServer: Using fallback IP guess (may not work)");
+        lazy.logConsole.debug(
+          "SimpleHTTPServer: Using fallback IP guess (may not work)"
+        );
         return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
       }
     }
 
-    return "200.0.0.1";
+    return null;
   }
 }

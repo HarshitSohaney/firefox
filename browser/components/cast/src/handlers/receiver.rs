@@ -27,7 +27,7 @@ impl ReceiverHandler {
         serde_json::to_string(&ReceiverMessage::GET_STATUS {
             request_id: self.next_request_id(),
         })
-        .unwrap()
+        .expect("serializing ReceiverMessage")
     }
 
     pub fn create_launch(&self, app_id: Option<&str>) -> String {
@@ -35,7 +35,7 @@ impl ReceiverHandler {
             request_id: self.next_request_id(),
             app_id: app_id.unwrap_or(DEFAULT_MEDIA_RECEIVER_APP_ID).to_string(),
         })
-        .unwrap()
+        .expect("serializing ReceiverMessage")
     }
 
     pub fn create_stop(&self, session_id: &str) -> String {
@@ -43,7 +43,7 @@ impl ReceiverHandler {
             request_id: self.next_request_id(),
             session_id: session_id.to_string(),
         })
-        .unwrap()
+        .expect("serializing ReceiverMessage")
     }
 }
 

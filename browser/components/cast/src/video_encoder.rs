@@ -316,6 +316,8 @@ impl CastVideoEncoder {
         Ok(result)
     }
 
+    /// Debug function for testing WebM output. Writes test frames to /tmp/test_webm.webm.
+    /// Use from Browser Console: encoder.dumpTestWebM(30) to generate a test file.
     xpcom_method!(dump_test_webm => DumpTestWebM(frames: u32));
     fn dump_test_webm(&self, frames: u32) -> Result<(), nsresult> {
         eprintln!(
@@ -411,7 +413,12 @@ impl Drop for VpxContext {
     }
 }
 
-fn rgba_to_i420(rgba: &[u8], width: u32, height: u32, img: &mut vpx_image_t) -> Result<(), nsresult> {
+fn rgba_to_i420(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    img: &mut vpx_image_t,
+) -> Result<(), nsresult> {
     unsafe {
         if img.planes[0].is_null() || img.planes[1].is_null() || img.planes[2].is_null() {
             return Err(nserror::NS_ERROR_NOT_INITIALIZED);

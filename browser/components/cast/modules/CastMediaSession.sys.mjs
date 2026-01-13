@@ -28,6 +28,7 @@ export class CastMediaSession {
     this.state = "idle";
     this.mediaUrl = null;
     this.contentType = null;
+    this._messageListener = null;
   }
 
   async start(mediaUrl, contentType, metadata = null) {
@@ -47,11 +48,12 @@ export class CastMediaSession {
     try {
       this.mediaHandler = new lazy.CastMediaHandler(this.castDevice);
 
-      this.castDevice.addEventListener("message", ({ namespace, payload }) => {
+      this._messageListener = ({ namespace, payload }) => {
         if (namespace === lazy.CastMediaHandler.NAMESPACE) {
           this.handleMediaMessage(JSON.stringify(payload));
         }
-      });
+      };
+      this.castDevice.addEventListener("message", this._messageListener);
 
       const defaultMetadata = {
         metadataType: 0,
@@ -106,6 +108,11 @@ export class CastMediaSession {
   }
 
   async cleanup() {
+    if (this._messageListener) {
+      this.castDevice.removeEventListener("message", this._messageListener);
+      this._messageListener = null;
+    }
+
     if (this.mediaHandler) {
       this.mediaHandler.reset();
       this.mediaHandler = null;

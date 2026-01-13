@@ -5,8 +5,8 @@
 #include "nsISupports.idl"
 
 /**
- * Cast video encoder using VP9.
- * Encodes RGBA frames to VP9 and wraps them in WebM containers.
+ * Cast video encoder using VP8.
+ * Encodes RGBA frames to VP8 and wraps them in WebM containers.
  */
 [scriptable, uuid(e3b2c4d6-7890-4abc-def1-234567890abc)]
 interface nsICastVideoEncoder : nsISupports
@@ -42,7 +42,8 @@ interface nsICastVideoEncoder : nsISupports
     void shutdown();
 
     /**
-     * Generate a test WebM file for debugging.
+     * Debug function: Generate a test WebM file for verifying encoder output.
+     * Writes test frames to /tmp/test_webm.webm.
      * @param frames Number of test frames to generate
      */
     void dumpTestWebM(in unsigned long frames);
