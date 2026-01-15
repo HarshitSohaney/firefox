@@ -36,6 +36,14 @@ document.addEventListener(
           case "Browser:SendLink":
             MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);
             break;
+          case "Browser:CastTab":
+            {
+              const castButton = document.getElementById("cast-button");
+              if (castButton) {
+                castButton.click();
+              }
+            }
+            break;
           case "cmd_pageSetup":
             PrintUtils.showPageSetup();
             break;

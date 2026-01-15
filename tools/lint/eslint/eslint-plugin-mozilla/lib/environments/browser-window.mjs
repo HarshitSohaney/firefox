@@ -48,6 +48,7 @@ const extraGlobals = {
 const MAPPINGS = {
   "browserPlacesViews.js":
     "browser/components/places/content/browserPlacesViews.js",
+  "browser-cast.js": "browser/components/cast/content/browser-cast.js",
   "browser-sidebar.js": "browser/components/sidebar/browser-sidebar.js",
   "panelUI.js": "browser/components/customizableui/content/panelUI.js",
   "printUtils.js": "toolkit/components/printing/content/printUtils.js",

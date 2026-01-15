@@ -1,0 +1,50 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+/**
+ * Cast video encoder using VP8.
+ * Encodes RGBA frames to VP8 and wraps them in WebM containers.
+ */
+[scriptable, uuid(e3b2c4d6-7890-4abc-def1-234567890abc)]
+interface nsICastVideoEncoder : nsISupports
+{
+    /**
+     * Initialize the encoder.
+     * @param width Frame width in pixels
+     * @param height Frame height in pixels
+     * @param bitrate Target bitrate in bits per second
+     * @param fps Frames per second
+     */
+    void init(in unsigned long width, in unsigned long height,
+              in unsigned long bitrate, in unsigned long fps);
+
+    /**
+     * Encode a single RGBA frame.
+     * @param rgbaData Raw RGBA pixel data
+     * @param forceKeyframe True to force this frame to be a keyframe
+     * @param timestampMs Timestamp in milliseconds from stream start
+     * @return WebM cluster containing the encoded frame
+     */
+    Array<octet> encodeFrame(in Array<octet> rgbaData, in boolean forceKeyframe, in long long timestampMs);
+
+    /**
+     * Get the WebM header that must be sent before any frames.
+     * @return WebM header bytes (EBML + Segment + Tracks)
+     */
+    Array<octet> getHeader();
+
+    /**
+     * Shutdown the encoder and free resources.
+     */
+    void shutdown();
+
+    /**
+     * Debug function: Generate a test WebM file for verifying encoder output.
+     * Writes test frames to /tmp/test_webm.webm.
+     * @param frames Number of test frames to generate
+     */
+    void dumpTestWebM(in unsigned long frames);
+};

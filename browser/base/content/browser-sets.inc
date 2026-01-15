@@ -25,6 +25,7 @@
     <command id="Browser:SavePage" />
 
     <command id="Browser:SendLink" />
+    <command id="Browser:CastTab" />
 
     <command id="cmd_pageSetup" />
     <command id="cmd_print" />

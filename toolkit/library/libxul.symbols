@@ -9,3 +9,4 @@ GeckoViewOpenWindow
 *ffi*
 FT*
 #endif
+NS_NewCastDevice

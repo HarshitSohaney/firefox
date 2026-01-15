@@ -1,0 +1,42 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+with Files("**"):
+    BUG_COMPONENT = ("Firefox", "Cast")
+
+JAR_MANIFESTS += ["jar.mn"]
+
+XPIDL_SOURCES += [
+    "nsICastDevice.idl",
+    "nsICastVideoEncoder.idl",
+]
+
+XPIDL_MODULE = "cast"
+
+XPCOM_MANIFESTS += [
+    "components.conf",
+]
+
+EXTRA_JS_MODULES.cast = [
+    "CastService.sys.mjs",
+    "modules/CastConstants.mjs",
+    "modules/CastDevice.sys.mjs",
+    "modules/CastDiscovery.sys.mjs",
+    "modules/CastError.mjs",
+    "modules/CastMediaHandler.sys.mjs",
+    "modules/CastMediaSession.sys.mjs",
+    "modules/CastSession.sys.mjs",
+    "modules/SimpleHTTPServer.sys.mjs",
+]
+
+UNIFIED_SOURCES += [
+    "src/webm_writer_bridge.cpp",
+]
+
+LOCAL_INCLUDES += [
+    "/dom/media/encoder",
+    "/dom/media/webm",
+]
+
+FINAL_LIBRARY = "browsercomps"

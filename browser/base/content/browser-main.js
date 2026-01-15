@@ -9,6 +9,7 @@
   Services.scriptloader.loadSubScript("chrome://browser/content/browser-init.js", this);
   Services.scriptloader.loadSubScript("chrome://global/content/contentAreaUtils.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/browser-captivePortal.js", this);
+  Services.scriptloader.loadSubScript("chrome://browser/content/browser-cast.js", this);
   if (AppConstants.MOZ_DATA_REPORTING) {
     Services.scriptloader.loadSubScript("chrome://browser/content/browser-data-submission-info-bar.js", this);
   }

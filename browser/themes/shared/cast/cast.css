@@ -1,0 +1,111 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#cast-button {
+  list-style-image: url("chrome://browser/skin/cast/cast-icon.svg");
+}
+
+#cast-indicator-anchor {
+  min-width: var(--size-item-small);
+  min-height: var(--size-item-small);
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+}
+
+#cast-button[attention="true"] #cast-indicator-icon {
+  fill: var(--toolbarbutton-icon-fill-attention);
+}
+
+#cast-button[attention="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: var(--space-xsmall);
+  right: var(--space-xsmall);
+  width: 6px;
+  height: 6px;
+  background: var(--toolbarbutton-icon-fill-attention, #0060df);
+  border: 1px solid var(--toolbar-bgcolor);
+  border-radius: var(--border-radius-circle);
+}
+
+#castPanel-mainView {
+  min-width: 20em;
+}
+
+#castPanel-emptyState {
+  padding: 1em;
+  text-align: center;
+  color: var(--text-color-deemphasized);
+}
+
+#castPanel-deviceList {
+  margin: 0;
+  padding: 0;
+}
+
+.cast-device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-small) var(--space-medium);
+  border: none;
+  margin: 0;
+  cursor: pointer;
+}
+
+.cast-device-item:hover {
+  background-color: var(--panel-item-hover-bgcolor);
+}
+
+.cast-device-item[selected="true"] {
+  background-color: var(--panel-item-active-bgcolor);
+}
+
+.cast-device-item.casting {
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 10%, transparent);
+}
+
+.cast-device-item.casting:hover {
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 15%, transparent);
+}
+
+.cast-device-name {
+  flex: 1;
+}
+
+.cast-device-status {
+  font-size: 0.85em;
+  font-weight: var(--font-weight-semibold);
+  color: var(--toolbarbutton-icon-fill-attention, #0060df);
+  padding: var(--space-xxsmall) var(--space-small);
+  border-radius: var(--border-radius-small);
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 15%, transparent);
+}
+
+#castPanel-activeSession {
+  padding: var(--space-medium);
+  background-color: color-mix(in srgb, var(--toolbarbutton-icon-fill-attention, #0060df) 8%, transparent);
+  border-top: 1px solid var(--panel-separator-color);
+}
+
+.cast-active-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-medium);
+}
+
+#castPanel-castingLabel {
+  font-weight: var(--font-weight-semibold);
+  color: var(--toolbarbutton-icon-fill-attention, #0060df);
+}
+
+#castPanel-stopButton {
+  padding: 6px var(--space-medium);
+  flex-shrink: 0;
+}
+
+#castPanel-manualAdd {
+  padding: var(--space-small) var(--space-medium);
+}

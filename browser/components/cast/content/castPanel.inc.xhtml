@@ -1,0 +1,45 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<panel id="castPanel"
+       data-l10n-id="cast-panel"
+       class="cui-widget-panel panel-no-padding"
+       role="group"
+       type="arrow"
+       orient="vertical"
+       hidden="true">
+
+  <linkset>
+    <html:link rel="localization" href="browser/cast.ftl" />
+  </linkset>
+
+  <panelmultiview id="castPanel-multiView" mainViewId="castPanel-mainView">
+    <panelview id="castPanel-mainView" class="cui-widget-panelview">
+      <vbox class="panel-header">
+        <html:h1 data-l10n-id="cast-panel-header"/>
+      </vbox>
+      <vbox class="panel-subview-body">
+        <description id="castPanel-emptyState"
+                     data-l10n-id="cast-panel-empty-state"
+                     hidden="true">
+        </description>
+        <richlistbox id="castPanel-deviceList"
+                     class="cast-device-list"/>
+        <vbox id="castPanel-activeSession" hidden="true">
+          <html:div class="cast-active-indicator">
+            <html:span id="castPanel-castingLabel"
+                       data-l10n-id="cast-panel-casting-label"/>
+            <button id="castPanel-stopButton"
+                    class="footer-button"
+                    data-l10n-id="cast-stop-button"/>
+          </html:div>
+        </vbox>
+      </vbox>
+      <toolbarseparator/>
+      <toolbarbutton id="castPanel-manualAdd"
+                     class="subviewbutton panel-subview-footer-button"
+                     data-l10n-id="cast-panel-manual-add"/>
+    </panelview>
+  </panelmultiview>
+</panel>
