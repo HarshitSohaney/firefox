@@ -257,6 +257,19 @@ sidebar-files-qr-code-heading = Scan to open on another device
 # Accessible label (alt text) for the QR code image.
 sidebar-files-qr-code =
   .alt = QR code that opens fileflow.harshitsohaney.com when scanned
+# Label for the button that opens a file picker to add local media to the panel.
+sidebar-files-add-media =
+  .label = Add media
+# Label for the button that picks a folder whose images are remembered and
+# loaded into the panel.
+sidebar-files-add-folder =
+  .label = Add folder
+# Label for the button that clears all added media and forgets remembered
+# folders.
+sidebar-files-clear-media =
+  .label = Clear
+# Hint shown when no local media has been added yet, inviting drag and drop.
+sidebar-files-media-hint = Drag images here from your desktop, or use Add media
 
 # Title attribute for the pinned tabs section in the Open Tabs sidebar
 # panel.

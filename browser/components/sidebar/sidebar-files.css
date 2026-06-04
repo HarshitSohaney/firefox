@@ -81,3 +81,61 @@
   border-radius: var(--border-radius-medium);
   padding: var(--space-small);
 }
+
+.media-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-small);
+  margin-block-end: var(--space-medium);
+}
+
+.media-actions {
+  display: flex;
+  gap: var(--space-small);
+}
+
+.media-add {
+  align-self: flex-start;
+}
+
+.media-hint {
+  margin: 0;
+  padding: var(--space-medium);
+  color: var(--text-color-deemphasized);
+  font-size: var(--font-size-small);
+  text-align: center;
+  border: var(--border-width) dashed var(--border-color);
+  border-radius: var(--border-radius-medium);
+}
+
+.media-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-small);
+}
+
+.media-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xxsmall);
+  width: 84px;
+  cursor: grab;
+}
+
+.media-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--border-radius-medium);
+  background-color: var(--button-background-color-ghost-hover);
+}
+
+.media-name {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-small);
+  color: var(--text-color-deemphasized);
+}
