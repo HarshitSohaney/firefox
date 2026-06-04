@@ -82,6 +82,12 @@ sidebar-show-on-the-left =
 expand-sidebar-on-hover =
   .label = Expand sidebar on hover
 sidebar-manage-extensions2 = Manage all extensions
+# Heading for a QR code shown in the sidebar customize panel. Scanning the
+# code opens a Firefox URL containing a randomly generated identifier.
+sidebar-customize-qr-code-heading = Scan to open on another device
+# Accessible label (alt text) for the QR code image.
+sidebar-customize-qr-code =
+  .alt = QR code that opens firefox.com when scanned
 
 ## Labels for sidebar context menu items
 

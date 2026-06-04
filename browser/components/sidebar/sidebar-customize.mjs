@@ -14,6 +14,10 @@ const { XPCOMUtils } = ChromeUtils.importESModule(
   "resource://gre/modules/XPCOMUtils.sys.mjs"
 );
 
+const { QR } = ChromeUtils.importESModule(
+  "moz-src:///toolkit/components/qrcode/encoder.mjs"
+);
+
 const l10nMap = new Map([
   ["viewGenaiChatSidebar", "sidebar-menu-genai-chat-label"],
   ["viewGenaiPageAssistSidebar", "sidebar-menu-genai-page-assist-label"],
@@ -76,6 +80,13 @@ export class SidebarCustomize extends SidebarPage {
 
   #prefValues = {};
 
+  #qrId = crypto.randomUUID();
+  #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+
+  get qrUrl() {
+    return `https://firefox.com/?id=${this.#qrId}`;
+  }
+
   static properties = {
     visibility: { type: String },
     isPositionStart: { type: Boolean },
@@ -91,6 +102,7 @@ export class SidebarCustomize extends SidebarPage {
     visibilityInput: "#hide-sidebar",
     verticalTabsInput: "#vertical-tabs",
     expandOnHoverInput: "#expand-on-hover",
+    qrCodeImage: ".sidebar-qr-code",
   };
 
   connectedCallback() {
@@ -305,6 +317,17 @@ export class SidebarCustomize extends SidebarPage {
                 </div>
               </div>`
           )}
+          <div class="customize-group qr-code-group">
+            <h4
+              class="customize-qr-code-heading"
+              data-l10n-id="sidebar-customize-qr-code-heading"
+            ></h4>
+            <img
+              class="sidebar-qr-code"
+              src=${this.#qrDataURI}
+              data-l10n-id="sidebar-customize-qr-code"
+            />
+          </div>
         </div>
         <div id="manage-settings">
           <img src="chrome://browser/skin/preferences/category-general.svg" class="icon" role="presentation" />
