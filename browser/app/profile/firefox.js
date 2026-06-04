@@ -2213,6 +2213,10 @@ pref("sidebar.new-sidebar.has-used", false);
 pref("sidebar.history.sortOption", "date");
 pref("sidebar.updatedBookmarks.enabled", false);
 pref("sidebar.openTabsPanel.enabled", false);
+pref("browser.files.sidebar.enabled", true);
+// Adds the Files panel to the launcher for existing sidebar.revamp users once
+// browser.files.sidebar.enabled is on. New users get it from DEFAULT_LAUNCHER_TOOLS.
+pref("sidebar.newTool.migration.files", "{ \"visibilityPref\": \"browser.files.sidebar.enabled\"}");
 
 pref("sidebar.notification.badge.aichat", false);
 

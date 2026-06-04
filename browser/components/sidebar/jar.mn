@@ -11,6 +11,9 @@ browser.jar:
     content/browser/sidebar/sidebar-customize.css
     content/browser/sidebar/sidebar-customize.html
     content/browser/sidebar/sidebar-customize.mjs
+    content/browser/sidebar/sidebar-files.css
+    content/browser/sidebar/sidebar-files.html
+    content/browser/sidebar/sidebar-files.mjs
     content/browser/sidebar/sidebar-main.css
     content/browser/sidebar/sidebar-main.mjs
     content/browser/sidebar/sidebar-history.css

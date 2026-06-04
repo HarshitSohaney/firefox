@@ -20,6 +20,7 @@ const toolsNameMap = {
   viewBookmarksSidebar: "bookmarks",
   viewOpenTabsSidebar: "opentabs",
   viewCPMSidebar: "passwords",
+  viewFilesSidebar: "files",
 };
 const EXPAND_ON_HOVER_DEBOUNCE_TIMEOUT_MS = 1000;
 const LAUNCHER_SPLITTER_WIDTH = 4;
@@ -248,6 +249,22 @@ var SidebarController = {
           menuL10nId: "menu-view-open-tabs",
           revampL10nId: "sidebar-menu-open-tabs-label",
           iconUrl: "chrome://browser/content/firefoxview/view-opentabs.svg",
+        }
+      );
+    }
+
+    if (this.sidebarRevampEnabled) {
+      this.registerPrefSidebar(
+        "browser.files.sidebar.enabled",
+        "viewFilesSidebar",
+        {
+          name: "files",
+          elementId: "sidebar-switcher-files",
+          url: "chrome://browser/content/sidebar/sidebar-files.html",
+          menuId: "menu_filesSidebar",
+          menuL10nId: "menu-view-files",
+          revampL10nId: "sidebar-menu-files-label",
+          iconUrl: "chrome://browser/skin/downloads/downloads.svg",
         }
       );
     }

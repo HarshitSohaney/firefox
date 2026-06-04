@@ -14,6 +14,11 @@ menu-view-contextual-password-manager =
 menu-view-open-tabs =
   .label = Open Tabs
 
+# Label for the Files entry in the View > Sidebars menu bar menu. The Files
+# panel lists the user's downloaded files.
+menu-view-files =
+  .label = Files
+
 sidebar-options-menu-button =
   .title = Open menu
 
@@ -157,6 +162,10 @@ sidebar-menu-open-tabs-label =
   .label = Open tabs
 sidebar-menu-bookmarks-label =
   .label = Bookmarks
+# Label for the Files panel in the sidebar tools list and customize menu. The
+# Files panel lists the user's downloaded files.
+sidebar-menu-files-label =
+  .label = Files
 sidebar-menu-customize-label =
   .label = Customize sidebar
 sidebar-menu-contextual-password-manager-label =
@@ -215,6 +224,10 @@ sidebar-menu-cpm-header =
   .heading = Passwords
 sidebar-menu-bookmarks-header =
   .heading = Bookmarks
+# Heading shown at the top of the Files sidebar panel, which lists the user's
+# downloaded files.
+sidebar-menu-files-header =
+  .heading = Files
 
 ## Labels for sidebar bookmarks panel folder names.
 
@@ -231,6 +244,19 @@ sidebar-syncedtabs-title = Tabs from other devices
 # Title of the Open Tabs sidebar panel. "Open tabs" refers to the tabs
 # currently open in the browser.
 sidebar-opentabs-title = Open tabs
+# Title of the Files sidebar panel, which lists the user's downloaded files.
+sidebar-files-title = Files
+
+## Files sidebar panel, which lists the user's downloaded files.
+
+# Tooltip for the button on a download row that opens the file's containing
+# folder in the operating system's file manager.
+sidebar-files-show-in-folder =
+  .title = Show in folder
+# Heading shown when there are no downloads to display in the Files panel.
+sidebar-files-empty-heading = No downloads yet
+# Description shown when there are no downloads to display in the Files panel.
+sidebar-files-empty-description = Files you download will appear here.
 
 # Title attribute for the pinned tabs section in the Open Tabs sidebar
 # panel.

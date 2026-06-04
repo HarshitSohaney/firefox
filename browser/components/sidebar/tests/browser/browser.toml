@@ -34,6 +34,8 @@ skip-if = [
   "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1894409
 ]
 
+["browser_files_sidebar.js"]
+
 ["browser_glean_sidebar.js"]
 skip-if = [
   "os == 'linux' && os_version == '24.04' && arch == 'x86_64' && display == 'x11' && opt && a11y_checks", # Bug 1972456
