@@ -49,3 +49,28 @@
 .files-show-in-folder {
   flex-shrink: 0;
 }
+
+.qr-code-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-small);
+  margin-block-start: var(--space-large);
+}
+
+.files-qr-code-heading {
+  margin: 0;
+  font-weight: var(--font-weight-heading);
+}
+
+.sidebar-qr-code {
+  /* Fixed size keeps the QR code crisply scannable; no design token applies. */
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  width: 160px;
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  height: 160px;
+  image-rendering: pixelated;
+  background-color: white;
+  border-radius: var(--border-radius-medium);
+  padding: var(--space-small);
+}

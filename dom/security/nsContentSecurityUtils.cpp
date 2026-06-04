@@ -1370,6 +1370,7 @@ static nsLiteralCString sImgSrcDataBlobAllowList[] = {
     "chrome://browser/content/screenshots/screenshots-preview.html"_ns,
     "chrome://browser/content/sidebar/sidebar-bookmarks.html"_ns,
     "chrome://browser/content/sidebar/sidebar-customize.html"_ns,
+    "chrome://browser/content/sidebar/sidebar-files.html"_ns,
     "chrome://browser/content/sidebar/sidebar-history.html"_ns,
     "chrome://browser/content/sidebar/sidebar-opentabs.html"_ns,
     "chrome://browser/content/sidebar/sidebar-syncedtabs.html"_ns,

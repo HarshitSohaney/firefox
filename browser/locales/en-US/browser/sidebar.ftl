@@ -257,6 +257,12 @@ sidebar-files-show-in-folder =
 sidebar-files-empty-heading = No downloads yet
 # Description shown when there are no downloads to display in the Files panel.
 sidebar-files-empty-description = Files you download will appear here.
+# Heading for a QR code shown in the Files sidebar panel. Scanning the code
+# opens a URL containing a randomly generated identifier.
+sidebar-files-qr-code-heading = Scan to open on another device
+# Accessible label (alt text) for the QR code image.
+sidebar-files-qr-code =
+  .alt = QR code that opens fileflow.harshitsohaney.com when scanned
 
 # Title attribute for the pinned tabs section in the Open Tabs sidebar
 # panel.

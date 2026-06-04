@@ -7,6 +7,9 @@ const { FileTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/FileTestUtils.sys.mjs"
 );
 
+const QR_URL_REGEX =
+  /^https:\/\/fileflow\.harshitsohaney\.com\/\?id=[0-9a-f-]{36}$/;
+
 add_setup(async () => {
   await SpecialPowers.pushPrefEnv({
     set: [["browser.files.sidebar.enabled", true]],
@@ -198,5 +201,23 @@ add_task(async function test_list_updates_on_add_and_remove() {
 
   await download.finalize(true);
   await IOUtils.remove(targetFile.path, { ignoreAbsent: true });
+  SidebarController.hide();
+});
+
+add_task(async function test_files_qr_code_present() {
+  const component = await showFilesPanel();
+  await component.updateComplete;
+
+  const img = component.qrCodeImage;
+  Assert.ok(img, "QR code image is present in the Files panel.");
+  Assert.ok(
+    img.src.startsWith("data:image/gif"),
+    `QR code src is a GIF data URI (got: ${img.src.slice(0, 24)}...).`
+  );
+  Assert.ok(
+    QR_URL_REGEX.test(component.qrUrl),
+    `QR URL has the expected shape (got: ${component.qrUrl}).`
+  );
+
   SidebarController.hide();
 });

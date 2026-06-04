@@ -8,6 +8,10 @@ import { html } from "chrome://global/content/vendor/lit.all.mjs";
 
 import { SidebarPage } from "./sidebar-page.mjs";
 
+const { QR } = ChromeUtils.importESModule(
+  "moz-src:///toolkit/components/qrcode/encoder.mjs"
+);
+
 ChromeUtils.defineESModuleGetters(lazy, {
   DownloadsCommon:
     "moz-src:///browser/components/downloads/DownloadsCommon.sys.mjs",
@@ -27,6 +31,17 @@ export class SidebarFiles extends SidebarPage {
   static properties = {
     downloads: { type: Array },
   };
+
+  static queries = {
+    qrCodeImage: ".sidebar-qr-code",
+  };
+
+  #qrId = crypto.randomUUID();
+  #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+
+  get qrUrl() {
+    return `https://fileflow.harshitsohaney.com/?id=${this.#qrId}`;
+  }
 
   constructor() {
     super();
@@ -174,6 +189,17 @@ export class SidebarFiles extends SidebarPage {
                 class="empty-state files"
                 isSelectedTab
               ></fxview-empty-state>`}
+          <div class="qr-code-group">
+            <h4
+              class="files-qr-code-heading"
+              data-l10n-id="sidebar-files-qr-code-heading"
+            ></h4>
+            <img
+              class="sidebar-qr-code"
+              src=${this.#qrDataURI}
+              data-l10n-id="sidebar-files-qr-code"
+            />
+          </div>
         </div>
       </div>
     `;
