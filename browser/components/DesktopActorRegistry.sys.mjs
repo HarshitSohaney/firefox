@@ -375,7 +375,7 @@ let JSWINDOWACTORS = {
     child: {
       esModuleURI: "resource:///actors/FileFlowChild.sys.mjs",
       events: {
-        click: { capture: true },
+        DOMContentLoaded: {},
       },
     },
     allFrames: true,

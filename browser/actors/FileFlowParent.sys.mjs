@@ -2,18 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const lazy = {};
-ChromeUtils.defineESModuleGetters(lazy, {
-  clearTimeout: "resource://gre/modules/Timer.sys.mjs",
-  setTimeout: "resource://gre/modules/Timer.sys.mjs",
-});
-
-const FILEFLOW_BASE = "https://fileflow.harshitsohaney.com";
-const POLL_INTERVAL_MS = 2000;
-
 export class FileFlowParent extends JSWindowActorParent {
-  #pollTimer = null;
   #qrId = null;
+  #onSidebarFile = null;
 
   receiveMessage(message) {
     if (message.name === "FileFlow:InputClicked") {
@@ -28,88 +19,34 @@ export class FileFlowParent extends JSWindowActorParent {
     }
     this.#qrId = crypto.randomUUID();
     await win.SidebarController.show("viewFilesSidebar");
-
-    const detail = { qrId: this.#qrId };
     win.dispatchEvent(
-      new win.CustomEvent("FileFlow:SessionStarted", { detail })
+      new win.CustomEvent("FileFlow:SessionStarted", {
+        detail: { qrId: this.#qrId },
+      })
     );
 
-    this.#startPolling();
-  }
-
-  #startPolling() {
-    this.#stopPolling();
-    const poll = async () => {
-      this.#pollTimer = null;
-      try {
-        const resp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.ready) {
-            await this.#fetchAndSendFile();
-            return;
-          }
-        }
-      } catch {
-        // Network error; retry on next interval.
-      }
-      this.#pollTimer = lazy.setTimeout(poll, POLL_INTERVAL_MS);
-    };
-    this.#pollTimer = lazy.setTimeout(poll, POLL_INTERVAL_MS);
-  }
-
-  #stopPolling() {
-    if (this.#pollTimer) {
-      lazy.clearTimeout(this.#pollTimer);
-      this.#pollTimer = null;
-    }
-  }
-
-  async #fetchAndSendFile() {
-    try {
-      const resp = await fetch(`${FILEFLOW_BASE}/file/${this.#qrId}`);
-      if (!resp.ok) {
-        return;
-      }
-      const contentType = resp.headers.get("content-type") || "image/png";
-      const blob = await resp.blob();
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-
-      const filename = `fileflow-image.${this.#extensionFromMime(contentType)}`;
-
+    this.#onSidebarFile = event => {
+      const { bytes, contentType, filename } = event.detail;
       this.sendAsyncMessage("FileFlow:FileReady", {
         bytes,
         filename,
         contentType,
       });
-
-      const win = this.browsingContext.topChromeWindow;
-      if (win) {
-        win.dispatchEvent(
-          new win.CustomEvent("FileFlow:FileReceived", {
-            detail: { bytes, contentType, filename },
-          })
-        );
-        win.SidebarController.hide();
-      }
-    } catch {
-      // File fetch failed; caller can retry if needed.
-    }
-  }
-
-  #extensionFromMime(mime) {
-    const map = {
-      "image/png": "png",
-      "image/jpeg": "jpg",
-      "image/gif": "gif",
-      "image/webp": "webp",
-      "image/svg+xml": "svg",
+      win.removeEventListener("FileFlow:SidebarFileReady", this.#onSidebarFile);
+      this.#onSidebarFile = null;
+      win.SidebarController.hide();
     };
-    return map[mime] || "png";
+    win.addEventListener("FileFlow:SidebarFileReady", this.#onSidebarFile);
   }
 
   didDestroy() {
-    this.#stopPolling();
+    if (this.#onSidebarFile) {
+      const win = this.browsingContext.topChromeWindow;
+      win?.removeEventListener(
+        "FileFlow:SidebarFileReady",
+        this.#onSidebarFile
+      );
+      this.#onSidebarFile = null;
+    }
   }
 }

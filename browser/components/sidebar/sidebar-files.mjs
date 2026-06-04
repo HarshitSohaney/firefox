@@ -62,11 +62,9 @@ export class SidebarFiles extends SidebarPage {
     this.mediaItems = [];
     this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
     this.#boundOnSession = this.#onFileFlowSession.bind(this);
-    this.#boundOnFileReceived = this.#onFileFlowFileReceived.bind(this);
   }
 
   #boundOnSession = null;
-  #boundOnFileReceived = null;
   #pollTimer = null;
   #parentOwnsSession = false;
 
@@ -82,7 +80,6 @@ export class SidebarFiles extends SidebarPage {
     this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
     const win = this.topWindow;
     win.addEventListener("FileFlow:SessionStarted", this.#boundOnSession);
-    win.addEventListener("FileFlow:FileReceived", this.#boundOnFileReceived);
     this.#parentOwnsSession = false;
     this.#startPolling();
   }
@@ -93,7 +90,6 @@ export class SidebarFiles extends SidebarPage {
     this.downloadsData?.removeView(this);
     const win = this.topWindow;
     win.removeEventListener("FileFlow:SessionStarted", this.#boundOnSession);
-    win.removeEventListener("FileFlow:FileReceived", this.#boundOnFileReceived);
   }
 
   #startPolling() {
@@ -102,9 +98,6 @@ export class SidebarFiles extends SidebarPage {
     }
     const poll = async () => {
       this.#pollTimer = null;
-      if (this.#parentOwnsSession) {
-        return;
-      }
       try {
         const resp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
         if (resp.ok) {
@@ -116,7 +109,16 @@ export class SidebarFiles extends SidebarPage {
               const bytes = new Uint8Array(await blob.arrayBuffer());
               const contentType = blob.type || "image/jpeg";
               const filename = `fileflow-${Date.now()}.${contentType.split("/")[1] || "jpg"}`;
-              await this.#saveAsDownload(bytes, contentType, filename);
+              if (this.#parentOwnsSession) {
+                this.topWindow.dispatchEvent(
+                  new CustomEvent("FileFlow:SidebarFileReady", {
+                    detail: { bytes, contentType, filename },
+                  })
+                );
+                this.#parentOwnsSession = false;
+              } else {
+                await this.#saveAsDownload(bytes, contentType, filename);
+              }
               this.#qrId = crypto.randomUUID();
               this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
               this.#pollTimer = setTimeout(poll, 2000);
@@ -144,14 +146,6 @@ export class SidebarFiles extends SidebarPage {
     this.#parentOwnsSession = true;
     this.#stopPolling();
     this.#qrId = qrId;
-    this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
-  }
-
-  async #onFileFlowFileReceived(event) {
-    const { bytes, contentType, filename } = event.detail;
-    await this.#saveAsDownload(bytes, contentType, filename);
-    this.#parentOwnsSession = false;
-    this.#qrId = crypto.randomUUID();
     this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
     this.#startPolling();
   }
@@ -608,41 +602,41 @@ export class SidebarFiles extends SidebarPage {
               data-l10n-id="sidebar-files-scrapbook-heading"
             ></h4>
             <div class="media-group">
-            <div class="media-actions">
-              <moz-button
-                class="media-add"
-                type="ghost"
-                iconSrc="chrome://global/skin/icons/plus.svg"
-                data-l10n-id="sidebar-files-add-media"
-                @click=${() => this.onAddMedia()}
-              ></moz-button>
-              <moz-button
-                class="media-add"
-                type="ghost"
-                iconSrc="chrome://global/skin/icons/folder.svg"
-                data-l10n-id="sidebar-files-add-folder"
-                @click=${() => this.onAddFolder()}
-              ></moz-button>
-              ${when(
-                this.mediaItems.length,
-                () =>
-                  html`<moz-button
-                    class="media-clear"
-                    type="ghost"
-                    iconSrc="chrome://global/skin/icons/delete.svg"
-                    data-l10n-id="sidebar-files-clear-media"
-                    @click=${() => this.onClearMedia()}
-                  ></moz-button>`
-              )}
-            </div>
-            ${this.mediaItems.length
-              ? html`<div class="media-grid">
-                  ${this.mediaItems.map(item => this.#mediaTemplate(item))}
-                </div>`
-              : html`<p
-                  class="media-hint"
-                  data-l10n-id="sidebar-files-media-hint"
-                ></p>`}
+              <div class="media-actions">
+                <moz-button
+                  class="media-add"
+                  type="ghost"
+                  iconSrc="chrome://global/skin/icons/plus.svg"
+                  data-l10n-id="sidebar-files-add-media"
+                  @click=${() => this.onAddMedia()}
+                ></moz-button>
+                <moz-button
+                  class="media-add"
+                  type="ghost"
+                  iconSrc="chrome://global/skin/icons/folder.svg"
+                  data-l10n-id="sidebar-files-add-folder"
+                  @click=${() => this.onAddFolder()}
+                ></moz-button>
+                ${when(
+                  this.mediaItems.length,
+                  () =>
+                    html`<moz-button
+                      class="media-clear"
+                      type="ghost"
+                      iconSrc="chrome://global/skin/icons/delete.svg"
+                      data-l10n-id="sidebar-files-clear-media"
+                      @click=${() => this.onClearMedia()}
+                    ></moz-button>`
+                )}
+              </div>
+              ${this.mediaItems.length
+                ? html`<div class="media-grid">
+                    ${this.mediaItems.map(item => this.#mediaTemplate(item))}
+                  </div>`
+                : html`<p
+                    class="media-hint"
+                    data-l10n-id="sidebar-files-media-hint"
+                  ></p>`}
             </div>
           </section>
           <section class="files-section">
@@ -651,18 +645,18 @@ export class SidebarFiles extends SidebarPage {
               data-l10n-id="sidebar-files-downloads-heading"
             ></h4>
             <div class="downloads-group">
-            ${when(
-              this.downloads.length,
-              () =>
-                html`<ul class="files-list">
-                  ${this.fileItems.map(item => this.#rowTemplate(item))}
-                </ul>`,
-              () =>
-                html`<p
-                  class="media-hint"
-                  data-l10n-id="sidebar-files-downloads-empty"
-                ></p>`
-            )}
+              ${when(
+                this.downloads.length,
+                () =>
+                  html`<ul class="files-list">
+                    ${this.fileItems.map(item => this.#rowTemplate(item))}
+                  </ul>`,
+                () =>
+                  html`<p
+                    class="media-hint"
+                    data-l10n-id="sidebar-files-downloads-empty"
+                  ></p>`
+              )}
             </div>
           </section>
           <section class="files-section">
@@ -671,18 +665,18 @@ export class SidebarFiles extends SidebarPage {
               data-l10n-id="sidebar-files-photoflow-heading"
             ></h4>
             <div class="qr-code-group">
-            <div class="qr-stack">
-              <img
-                class="qr-kit"
-                src="chrome://browser/content/sidebar/firefox-mascot.png"
-                role="presentation"
-              />
-              <img
-                class="sidebar-qr-code"
-                src=${this.qrDataURI}
-                data-l10n-id="sidebar-files-qr-code"
-              />
-            </div>
+              <div class="qr-stack">
+                <img
+                  class="qr-kit"
+                  src="chrome://browser/content/sidebar/firefox-mascot.png"
+                  role="presentation"
+                />
+                <img
+                  class="sidebar-qr-code"
+                  src=${this.qrDataURI}
+                  data-l10n-id="sidebar-files-qr-code"
+                />
+              </div>
             </div>
           </section>
         </div>

@@ -1001,6 +1001,19 @@ nsresult HTMLInputElement::InitFilePicker(FilePickerType aType) {
                          nullptr);
   }
 
+  // Allow chrome observers (e.g. FileFlow) to prevent the native file picker
+  // from opening by setting a data attribute on the element during the
+  // synchronous observer notification.
+  {
+    nsAutoString intercepted;
+    GetAttribute(u"data-file-picker-intercepted"_ns, intercepted);
+    if (!intercepted.IsEmpty()) {
+      IgnoredErrorResult rv;
+      RemoveAttribute(u"data-file-picker-intercepted"_ns, rv);
+      return NS_OK;
+    }
+  }
+
   if (!oldFiles.IsEmpty() && aType != FILE_PICKER_DIRECTORY) {
     nsAutoString path;
 
