@@ -14,10 +14,10 @@ menu-view-contextual-password-manager =
 menu-view-open-tabs =
   .label = Open Tabs
 
-# Label for the Files entry in the View > Sidebars menu bar menu. The Files
-# panel lists the user's downloaded files.
+# Label for the Media entry in the View > Sidebars menu bar menu. The Media
+# panel lists the user's media and downloaded files.
 menu-view-files =
-  .label = Files
+  .label = Media
 
 sidebar-options-menu-button =
   .title = Open menu
@@ -156,10 +156,10 @@ sidebar-menu-open-tabs-label =
   .label = Open tabs
 sidebar-menu-bookmarks-label =
   .label = Bookmarks
-# Label for the Files panel in the sidebar tools list and customize menu. The
-# Files panel lists the user's downloaded files.
+# Label for the Media panel in the sidebar tools list and customize menu. The
+# Media panel lists the user's media and downloaded files.
 sidebar-menu-files-label =
-  .label = Files
+  .label = Media
 sidebar-menu-customize-label =
   .label = Customize sidebar
 sidebar-menu-contextual-password-manager-label =
@@ -218,10 +218,10 @@ sidebar-menu-cpm-header =
   .heading = Passwords
 sidebar-menu-bookmarks-header =
   .heading = Bookmarks
-# Heading shown at the top of the Files sidebar panel, which lists the user's
-# downloaded files.
+# Heading shown at the top of the Media sidebar panel, which lists the user's
+# media and downloaded files.
 sidebar-menu-files-header =
-  .heading = Files
+  .heading = Media
 
 ## Labels for sidebar bookmarks panel folder names.
 
@@ -238,8 +238,9 @@ sidebar-syncedtabs-title = Tabs from other devices
 # Title of the Open Tabs sidebar panel. "Open tabs" refers to the tabs
 # currently open in the browser.
 sidebar-opentabs-title = Open tabs
-# Title of the Files sidebar panel, which lists the user's downloaded files.
-sidebar-files-title = Files
+# Title of the Media sidebar panel, which lists the user's media and
+# downloaded files.
+sidebar-files-title = Media
 
 ## Files sidebar panel, which lists the user's downloaded files.
 
