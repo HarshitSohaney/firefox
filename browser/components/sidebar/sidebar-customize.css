@@ -111,24 +111,3 @@ moz-checkbox {
 .customize-group:not(.no-end-margin) {
   margin-block-end: var(--space-xlarge);
 }
-
-.qr-code-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-small);
-}
-
-.customize-qr-code-heading {
-  margin: 0;
-  font-weight: var(--font-weight-heading);
-}
-
-.sidebar-qr-code {
-  width: 160px;
-  height: 160px;
-  image-rendering: pixelated;
-  background-color: #fff;
-  border-radius: var(--border-radius-medium);
-  padding: var(--space-small);
-}
