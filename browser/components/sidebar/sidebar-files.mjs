@@ -4,7 +4,7 @@
 
 const lazy = {};
 
-import { html, when } from "chrome://global/content/vendor/lit.all.mjs";
+import { html } from "chrome://global/content/vendor/lit.all.mjs";
 
 import { SidebarPage } from "./sidebar-page.mjs";
 
@@ -16,6 +16,7 @@ const FILEFLOW_BASE = "https://fileflow.harshitsohaney.com";
 const FILEFLOW_POLL_INTERVAL_MS = 1500;
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  Downloads: "resource://gre/modules/Downloads.sys.mjs",
   DownloadsCommon:
     "moz-src:///browser/components/downloads/DownloadsCommon.sys.mjs",
   DownloadsViewUI:
@@ -33,7 +34,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 export class SidebarFiles extends SidebarPage {
   static properties = {
     downloads: { type: Array },
-    fileflowImage: { type: String },
   };
 
   static queries = {
@@ -41,6 +41,10 @@ export class SidebarFiles extends SidebarPage {
   };
 
   #fileflowTimer = null;
+
+  // Maps a download's target path to a generated thumbnail data URL (or null
+  // while one is being generated) for image downloads.
+  #thumbnails = new Map();
 
   #qrId = crypto.randomUUID();
   #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
@@ -52,7 +56,6 @@ export class SidebarFiles extends SidebarPage {
   constructor() {
     super();
     this.downloads = [];
-    this.fileflowImage = null;
   }
 
   connectedCallback() {
@@ -72,7 +75,8 @@ export class SidebarFiles extends SidebarPage {
   }
 
   // Poll the FileFlow server for a photo uploaded from the paired phone. Once
-  // the file is ready, fetch it and display it next to the QR code.
+  // the file is ready, save it to disk as a regular download so it shows up in
+  // the list and can be dragged out like any other downloaded item.
   #startFileFlowPolling() {
     if (this.#fileflowTimer) {
       return;
@@ -86,10 +90,10 @@ export class SidebarFiles extends SidebarPage {
           if (ready) {
             const fileResp = await fetch(`${FILEFLOW_BASE}/file/${this.#qrId}`);
             if (fileResp.ok) {
-              this.fileflowImage = await this.#blobToDataURL(
-                await fileResp.blob()
-              );
-              return;
+              await this.#saveAsDownload(await fileResp.blob());
+              // Rotate to a fresh QR code so the next scan/upload is a new,
+              // distinct transfer. Polling continues against the new id below.
+              this.#refreshQrCode();
             }
           }
         }
@@ -108,29 +112,72 @@ export class SidebarFiles extends SidebarPage {
     }
   }
 
-  #blobToDataURL(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+  // Generate a new QR id and code, and re-render so the displayed QR updates.
+  #refreshQrCode() {
+    this.#qrId = crypto.randomUUID();
+    this.#qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+    this.requestUpdate();
+  }
+
+  // Write the received blob into the downloads directory and register it as a
+  // succeeded download. The panel already observes the public downloads list,
+  // so the new item renders as a (draggable) row automatically.
+  async #saveAsDownload(blob) {
+    const downloadsDir = await lazy.Downloads.getPreferredDownloadsDirectory();
+    const fileName = `fileflow-photo-${this.#qrId}${this.#extensionForType(
+      blob.type
+    )}`;
+    const targetPath = PathUtils.join(downloadsDir, fileName);
+    await IOUtils.write(targetPath, new Uint8Array(await blob.arrayBuffer()));
+
+    const download = await lazy.Downloads.createDownload({
+      source: { url: `${FILEFLOW_BASE}/file/${this.#qrId}` },
+      target: { path: targetPath },
+      contentType: blob.type,
+      succeeded: true,
     });
+    const list = await lazy.Downloads.getList(lazy.Downloads.PUBLIC);
+    await list.add(download);
+    await download.refresh();
+  }
+
+  #extensionForType(type) {
+    try {
+      const mimeService = Cc["@mozilla.org/mime;1"].getService(
+        Ci.nsIMIMEService
+      );
+      const primary = mimeService.getFromTypeAndExtension(
+        type,
+        ""
+      ).primaryExtension;
+      if (primary) {
+        return `.${primary}`;
+      }
+    } catch (e) {
+      // Unknown content type; fall back to no extension.
+    }
+    return "";
   }
 
   // DownloadsData view callbacks. Download objects are mutated in place, so we
   // reassign the array to make Lit re-render.
   onDownloadAdded(download) {
     this.downloads = [download, ...this.downloads];
+    this.#ensureThumbnail(download);
   }
 
   onDownloadChanged(download) {
     if (this.downloads.includes(download)) {
       this.downloads = [...this.downloads];
     }
+    this.#ensureThumbnail(download);
   }
 
   onDownloadRemoved(download) {
     this.downloads = this.downloads.filter(d => d !== download);
+    if (download.target?.path) {
+      this.#thumbnails.delete(download.target.path);
+    }
   }
 
   get fileItems() {
@@ -146,8 +193,72 @@ export class SidebarFiles extends SidebarPage {
         icon: download.target.path
           ? `moz-icon://${download.target.path}?size=16`
           : "moz-icon://.unknown?size=16",
+        thumbnail: this.#thumbnails.get(download.target?.path) ?? null,
         status: lazy.DownloadsViewUI.getSizeWithUnits(download),
       };
+    });
+  }
+
+  // For a succeeded image download, generate a downscaled thumbnail (longest
+  // side capped at 100px, aspect ratio preserved) and cache it as a data URL
+  // keyed by path.
+  async #ensureThumbnail(download) {
+    const path = download.target?.path;
+    if (!download.succeeded || !path || this.#thumbnails.has(path)) {
+      return;
+    }
+    if (!this.#isImageDownload(download)) {
+      return;
+    }
+    // Reserve the slot so concurrent change events don't read the file twice.
+    this.#thumbnails.set(path, null);
+    try {
+      const bytes = await IOUtils.read(path);
+      const type = download.contentType || "image/png";
+      const bitmap = await createImageBitmap(new Blob([bytes], { type }));
+      try {
+        this.#thumbnails.set(path, await this.#downscaleToDataURL(bitmap));
+      } finally {
+        bitmap.close();
+      }
+      this.requestUpdate();
+    } catch (e) {
+      // Couldn't decode (e.g. corrupt or unsupported); fall back to the icon
+      // and allow a later attempt.
+      this.#thumbnails.delete(path);
+    }
+  }
+
+  #isImageDownload(download) {
+    if (download.contentType?.startsWith("image/")) {
+      return true;
+    }
+    const match = download.target?.path?.match(/\.([^.]+)$/);
+    const ext = match?.[1].toLowerCase();
+    return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif", "ico"].includes(
+      ext
+    );
+  }
+
+  async #downscaleToDataURL(bitmap) {
+    const maxDimension = 100;
+    const largestSide = Math.max(bitmap.width, bitmap.height);
+    const scale = largestSide > maxDimension ? maxDimension / largestSide : 1;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(width, height);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+    return this.#blobToDataURL(
+      await canvas.convertToBlob({ type: "image/png" })
+    );
+  }
+
+  #blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   }
 
@@ -199,7 +310,14 @@ export class SidebarFiles extends SidebarPage {
       draggable="true"
       @dragstart=${e => this.onDragStart(e, item.download)}
     >
-      <img class="files-icon" src=${item.icon} alt="" />
+      ${item.thumbnail
+        ? html`<img
+            class="files-thumbnail"
+            src=${item.thumbnail}
+            alt=""
+            draggable="false"
+          />`
+        : html`<img class="files-icon" src=${item.icon} alt="" />`}
       <a
         class="files-name"
         href="#"
@@ -254,14 +372,6 @@ export class SidebarFiles extends SidebarPage {
               src=${this.#qrDataURI}
               data-l10n-id="sidebar-files-qr-code"
             />
-            ${when(
-              this.fileflowImage,
-              () =>
-                html`<img
-                  class="fileflow-received"
-                  src=${this.fileflowImage}
-                />`
-            )}
           </div>
         </div>
       </div>

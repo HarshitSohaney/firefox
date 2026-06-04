@@ -17,6 +17,13 @@
   border-radius: var(--border-radius-small);
 }
 
+.files-thumbnail {
+  flex-shrink: 0;
+  /* The image is already downscaled so its longest side is 100px. */
+  block-size: auto;
+  border-radius: var(--border-radius-small);
+}
+
 .files-row:hover {
   background-color: var(--button-background-color-ghost-hover);
 }
@@ -73,10 +80,4 @@
   background-color: white;
   border-radius: var(--border-radius-medium);
   padding: var(--space-small);
-}
-
-.fileflow-received {
-  max-inline-size: 100%;
-  height: auto;
-  border-radius: var(--border-radius-medium);
 }
