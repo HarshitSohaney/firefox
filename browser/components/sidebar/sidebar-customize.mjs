@@ -27,6 +27,9 @@ const l10nMap = new Map([
   ["viewOpenTabsSidebar", "sidebar-menu-open-tabs-label"],
   ["viewCPMSidebar", "sidebar-menu-contextual-password-manager-label"],
 ]);
+const FILEFLOW_BASE = "https://fileflow.harshitsohaney.com";
+const FILEFLOW_POLL_INTERVAL_MS = 1500;
+
 const VISIBILITY_SETTING_PREF = "sidebar.visibility";
 const EXPAND_ON_HOVER_PREF = "sidebar.expandOnHover";
 const POSITION_SETTING_PREF = "sidebar.position_start";
@@ -76,9 +79,12 @@ export class SidebarCustomize extends SidebarPage {
     this.verticalTabsEnabled = this.#prefValues.verticalTabsEnabled;
     this.expandOnHoverEnabled = this.#prefValues.expandOnHoverEnabled;
     this.boundObserve = (...args) => this.observe(...args);
+    this.fileflowImage = null;
   }
 
   #prefValues = {};
+
+  #fileflowTimer = null;
 
   #qrId = crypto.randomUUID();
   #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
@@ -92,6 +98,7 @@ export class SidebarCustomize extends SidebarPage {
     isPositionStart: { type: Boolean },
     verticalTabsEnabled: { type: Boolean },
     expandOnHoverEnabled: { type: Boolean },
+    fileflowImage: { type: String },
   };
 
   static queries = {
@@ -110,6 +117,7 @@ export class SidebarCustomize extends SidebarPage {
     this.getWindow().addEventListener("SidebarItemAdded", this);
     this.getWindow().addEventListener("SidebarItemChanged", this);
     this.getWindow().addEventListener("SidebarItemRemoved", this);
+    this.#startFileFlowPolling();
   }
 
   disconnectedCallback() {
@@ -117,6 +125,53 @@ export class SidebarCustomize extends SidebarPage {
     this.getWindow().removeEventListener("SidebarItemAdded", this);
     this.getWindow().removeEventListener("SidebarItemChanged", this);
     this.getWindow().removeEventListener("SidebarItemRemoved", this);
+    this.#stopFileFlowPolling();
+  }
+
+  // Poll the FileFlow server for a photo uploaded from the paired phone. Once
+  // the file is ready, fetch it and display it next to the QR code.
+  #startFileFlowPolling() {
+    if (this.#fileflowTimer) {
+      return;
+    }
+    const poll = async () => {
+      this.#fileflowTimer = null;
+      try {
+        const statusResp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
+        if (statusResp.ok) {
+          const { ready } = await statusResp.json();
+          if (ready) {
+            const fileResp = await fetch(`${FILEFLOW_BASE}/file/${this.#qrId}`);
+            if (fileResp.ok) {
+              this.fileflowImage = await this.#blobToDataURL(
+                await fileResp.blob()
+              );
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        // The phone hasn't uploaded yet, or the network blipped. Keep polling.
+      }
+      this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+    };
+    this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+  }
+
+  #stopFileFlowPolling() {
+    if (this.#fileflowTimer) {
+      clearTimeout(this.#fileflowTimer);
+      this.#fileflowTimer = null;
+    }
+  }
+
+  #blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   get fluentStrings() {
@@ -327,6 +382,14 @@ export class SidebarCustomize extends SidebarPage {
               src=${this.#qrDataURI}
               data-l10n-id="sidebar-customize-qr-code"
             />
+            ${when(
+              this.fileflowImage,
+              () =>
+                html`<img
+                  class="fileflow-received"
+                  src=${this.fileflowImage}
+                />`
+            )}
           </div>
         </div>
         <div id="manage-settings">
