@@ -8,7 +8,7 @@ const { FileTestUtils } = ChromeUtils.importESModule(
 );
 
 const QR_URL_REGEX =
-  /^https:\/\/fileflow\.harshitsohaney\.com\/\?id=[0-9a-f-]{36}$/;
+  /^https:\/\/fileflow\.harshitsohaney\.com\/[0-9a-f-]{36}$/;
 
 add_setup(async () => {
   await SpecialPowers.pushPrefEnv({

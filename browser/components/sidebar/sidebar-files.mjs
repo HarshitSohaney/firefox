@@ -4,13 +4,16 @@
 
 const lazy = {};
 
-import { html } from "chrome://global/content/vendor/lit.all.mjs";
+import { html, when } from "chrome://global/content/vendor/lit.all.mjs";
 
 import { SidebarPage } from "./sidebar-page.mjs";
 
 const { QR } = ChromeUtils.importESModule(
   "moz-src:///toolkit/components/qrcode/encoder.mjs"
 );
+
+const FILEFLOW_BASE = "https://fileflow.harshitsohaney.com";
+const FILEFLOW_POLL_INTERVAL_MS = 1500;
 
 ChromeUtils.defineESModuleGetters(lazy, {
   DownloadsCommon:
@@ -30,22 +33,26 @@ ChromeUtils.defineESModuleGetters(lazy, {
 export class SidebarFiles extends SidebarPage {
   static properties = {
     downloads: { type: Array },
+    fileflowImage: { type: String },
   };
 
   static queries = {
     qrCodeImage: ".sidebar-qr-code",
   };
 
+  #fileflowTimer = null;
+
   #qrId = crypto.randomUUID();
   #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
 
   get qrUrl() {
-    return `https://fileflow.harshitsohaney.com/?id=${this.#qrId}`;
+    return `${FILEFLOW_BASE}/${this.#qrId}`;
   }
 
   constructor() {
     super();
     this.downloads = [];
+    this.fileflowImage = null;
   }
 
   connectedCallback() {
@@ -55,11 +62,59 @@ export class SidebarFiles extends SidebarPage {
     this.downloadsData = lazy.DownloadsCommon.getData(this.topWindow);
     lazy.DownloadsCommon.initializeAllDataLinks();
     this.downloadsData.addView(this);
+    this.#startFileFlowPolling();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.downloadsData?.removeView(this);
+    this.#stopFileFlowPolling();
+  }
+
+  // Poll the FileFlow server for a photo uploaded from the paired phone. Once
+  // the file is ready, fetch it and display it next to the QR code.
+  #startFileFlowPolling() {
+    if (this.#fileflowTimer) {
+      return;
+    }
+    const poll = async () => {
+      this.#fileflowTimer = null;
+      try {
+        const statusResp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
+        if (statusResp.ok) {
+          const { ready } = await statusResp.json();
+          if (ready) {
+            const fileResp = await fetch(`${FILEFLOW_BASE}/file/${this.#qrId}`);
+            if (fileResp.ok) {
+              this.fileflowImage = await this.#blobToDataURL(
+                await fileResp.blob()
+              );
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        // The phone hasn't uploaded yet, or the network blipped. Keep polling.
+      }
+      this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+    };
+    this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+  }
+
+  #stopFileFlowPolling() {
+    if (this.#fileflowTimer) {
+      clearTimeout(this.#fileflowTimer);
+      this.#fileflowTimer = null;
+    }
+  }
+
+  #blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   // DownloadsData view callbacks. Download objects are mutated in place, so we
@@ -199,6 +254,14 @@ export class SidebarFiles extends SidebarPage {
               src=${this.#qrDataURI}
               data-l10n-id="sidebar-files-qr-code"
             />
+            ${when(
+              this.fileflowImage,
+              () =>
+                html`<img
+                  class="fileflow-received"
+                  src=${this.fileflowImage}
+                />`
+            )}
           </div>
         </div>
       </div>

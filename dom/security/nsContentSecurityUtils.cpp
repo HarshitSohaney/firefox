@@ -1453,7 +1453,11 @@ static nsLiteralCString sConnectSrcAddonsAllowList[] = {
 };
 // connect-src https://example.org
 //  Any https host source.
-static nsLiteralCString sConnectSrcHttpsHostAllowList[] = {"about:logging"_ns};
+static nsLiteralCString sConnectSrcHttpsHostAllowList[] = {
+    "about:logging"_ns,
+    "chrome://browser/content/sidebar/sidebar-customize.html"_ns,
+    "chrome://browser/content/sidebar/sidebar-files.html"_ns,
+};
 
 class DisallowingVisitor : public nsCSPSrcVisitor {
  public:
@@ -1985,6 +1989,7 @@ void nsContentSecurityUtils::AssertChromePageHasCSP(Document* aDocument) {
   // For now we don't require chrome: pages to have a `object-src 'none'`
   // directive.
   CHECK_DIR(OBJECT_SRC_DIRECTIVE, DisallowingVisitor);
+  CHECK_DIR(CONNECT_SRC_DIRECTIVE, ConnectSrcVisitor);
 
   nsTArray<nsString> directiveNames;
   policy->getDirectiveNames(directiveNames);
@@ -1992,7 +1997,8 @@ void nsContentSecurityUtils::AssertChromePageHasCSP(Document* aDocument) {
     if (dir.EqualsLiteral("default-src") || dir.EqualsLiteral("script-src") ||
         dir.EqualsLiteral("script-src-attr") ||
         dir.EqualsLiteral("style-src") || dir.EqualsLiteral("img-src") ||
-        dir.EqualsLiteral("media-src") || dir.EqualsLiteral("object-src")) {
+        dir.EqualsLiteral("media-src") || dir.EqualsLiteral("object-src") ||
+        dir.EqualsLiteral("connect-src")) {
       continue;
     }
 

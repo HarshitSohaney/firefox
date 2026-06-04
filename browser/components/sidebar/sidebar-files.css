@@ -74,3 +74,9 @@
   border-radius: var(--border-radius-medium);
   padding: var(--space-small);
 }
+
+.fileflow-received {
+  max-inline-size: 100%;
+  height: auto;
+  border-radius: var(--border-radius-medium);
+}
