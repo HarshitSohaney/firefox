@@ -29,6 +29,9 @@ with Files("BrowserTabChild.sys.mjs"):
 with Files("ClickHandler*.sys.mjs"):
     BUG_COMPONENT = ("Firefox", "Tabbed Browser")
 
+with Files("FileFlow*.sys.mjs"):
+    BUG_COMPONENT = ("Firefox", "General")
+
 with Files("ContentSearch*.sys.mjs"):
     BUG_COMPONENT = ("Firefox", "Search")
 
@@ -116,6 +119,8 @@ FINAL_TARGET_FILES.actors += [
     "DOMFullscreenParent.sys.mjs",
     "EncryptedMediaChild.sys.mjs",
     "EncryptedMediaParent.sys.mjs",
+    "FileFlowChild.sys.mjs",
+    "FileFlowParent.sys.mjs",
     "FormValidationChild.sys.mjs",
     "FormValidationParent.sys.mjs",
     "LightweightThemeChild.sys.mjs",

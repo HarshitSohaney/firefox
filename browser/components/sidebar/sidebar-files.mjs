@@ -13,7 +13,6 @@ const { QR } = ChromeUtils.importESModule(
 );
 
 const FILEFLOW_BASE = "https://fileflow.harshitsohaney.com";
-const FILEFLOW_POLL_INTERVAL_MS = 1500;
 
 const MEDIA_FOLDERS_PREF = "sidebar.fileflow.mediaFolders";
 const MEDIA_FILES_PREF = "sidebar.fileflow.mediaFiles";
@@ -40,20 +39,18 @@ export class SidebarFiles extends SidebarPage {
   static properties = {
     downloads: { type: Array },
     mediaItems: { type: Array },
+    qrDataURI: { type: String },
   };
 
   static queries = {
     qrCodeImage: ".sidebar-qr-code",
   };
 
-  #fileflowTimer = null;
-
   // Maps a download's target path to a generated thumbnail data URL (or null
   // while one is being generated) for image downloads.
   #thumbnails = new Map();
 
   #qrId = crypto.randomUUID();
-  #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
 
   get qrUrl() {
     return `${FILEFLOW_BASE}/${this.#qrId}`;
@@ -63,7 +60,15 @@ export class SidebarFiles extends SidebarPage {
     super();
     this.downloads = [];
     this.mediaItems = [];
+    this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+    this.#boundOnSession = this.#onFileFlowSession.bind(this);
+    this.#boundOnFileReceived = this.#onFileFlowFileReceived.bind(this);
   }
+
+  #boundOnSession = null;
+  #boundOnFileReceived = null;
+  #pollTimer = null;
+  #parentOwnsSession = false;
 
   connectedCallback() {
     super.connectedCallback();
@@ -72,99 +77,99 @@ export class SidebarFiles extends SidebarPage {
     this.downloadsData = lazy.DownloadsCommon.getData(this.topWindow);
     lazy.DownloadsCommon.initializeAllDataLinks();
     this.downloadsData.addView(this);
-    this.#startFileFlowPolling();
     this.#loadRememberedMedia();
+    this.#qrId = crypto.randomUUID();
+    this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+    const win = this.topWindow;
+    win.addEventListener("FileFlow:SessionStarted", this.#boundOnSession);
+    win.addEventListener("FileFlow:FileReceived", this.#boundOnFileReceived);
+    this.#parentOwnsSession = false;
+    this.#startPolling();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.#stopPolling();
     this.downloadsData?.removeView(this);
-    this.#stopFileFlowPolling();
+    const win = this.topWindow;
+    win.removeEventListener("FileFlow:SessionStarted", this.#boundOnSession);
+    win.removeEventListener("FileFlow:FileReceived", this.#boundOnFileReceived);
   }
 
-  // Poll the FileFlow server for a photo uploaded from the paired phone. Once
-  // the file is ready, save it to disk as a regular download so it shows up in
-  // the list and can be dragged out like any other downloaded item.
-  #startFileFlowPolling() {
-    if (this.#fileflowTimer) {
+  #startPolling() {
+    if (this.#pollTimer) {
       return;
     }
     const poll = async () => {
-      this.#fileflowTimer = null;
+      this.#pollTimer = null;
+      if (this.#parentOwnsSession) {
+        return;
+      }
       try {
-        const statusResp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
-        if (statusResp.ok) {
-          const { ready } = await statusResp.json();
+        const resp = await fetch(`${FILEFLOW_BASE}/status/${this.#qrId}`);
+        if (resp.ok) {
+          const { ready } = await resp.json();
           if (ready) {
             const fileResp = await fetch(`${FILEFLOW_BASE}/file/${this.#qrId}`);
             if (fileResp.ok) {
-              await this.#saveAsDownload(await fileResp.blob());
-              // Rotate to a fresh QR code so the next scan/upload is a new,
-              // distinct transfer. Polling continues against the new id below.
-              this.#refreshQrCode();
+              const blob = await fileResp.blob();
+              const bytes = new Uint8Array(await blob.arrayBuffer());
+              const contentType = blob.type || "image/jpeg";
+              const filename = `fileflow-${Date.now()}.${contentType.split("/")[1] || "jpg"}`;
+              await this.#saveAsDownload(bytes, contentType, filename);
+              this.#qrId = crypto.randomUUID();
+              this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+              this.#pollTimer = setTimeout(poll, 2000);
+              return;
             }
           }
         }
       } catch (e) {
-        // The phone hasn't uploaded yet, or the network blipped. Keep polling.
+        // Network blip or phone hasn't uploaded yet.
       }
-      this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+      this.#pollTimer = setTimeout(poll, 2000);
     };
-    this.#fileflowTimer = setTimeout(poll, FILEFLOW_POLL_INTERVAL_MS);
+    this.#pollTimer = setTimeout(poll, 2000);
   }
 
-  #stopFileFlowPolling() {
-    if (this.#fileflowTimer) {
-      clearTimeout(this.#fileflowTimer);
-      this.#fileflowTimer = null;
+  #stopPolling() {
+    if (this.#pollTimer) {
+      clearTimeout(this.#pollTimer);
+      this.#pollTimer = null;
     }
   }
 
-  // Generate a new QR id and code, and re-render so the displayed QR updates.
-  #refreshQrCode() {
-    this.#qrId = crypto.randomUUID();
-    this.#qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
-    this.requestUpdate();
+  #onFileFlowSession(event) {
+    const { qrId } = event.detail;
+    this.#parentOwnsSession = true;
+    this.#stopPolling();
+    this.#qrId = qrId;
+    this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
   }
 
-  // Write the received blob into the downloads directory and register it as a
-  // succeeded download. The panel already observes the public downloads list,
-  // so the new item renders as a (draggable) row automatically.
-  async #saveAsDownload(blob) {
+  async #onFileFlowFileReceived(event) {
+    const { bytes, contentType, filename } = event.detail;
+    await this.#saveAsDownload(bytes, contentType, filename);
+    this.#parentOwnsSession = false;
+    this.#qrId = crypto.randomUUID();
+    this.qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
+    this.#startPolling();
+  }
+
+  async #saveAsDownload(bytes, contentType, filename) {
     const downloadsDir = await lazy.Downloads.getPreferredDownloadsDirectory();
-    const fileName = `fileflow-photo-${this.#qrId}${this.#extensionForType(
-      blob.type
-    )}`;
-    const targetPath = PathUtils.join(downloadsDir, fileName);
-    await IOUtils.write(targetPath, new Uint8Array(await blob.arrayBuffer()));
+    const targetPath = PathUtils.join(downloadsDir, filename);
+    await IOUtils.write(targetPath, new Uint8Array(bytes));
 
     const download = await lazy.Downloads.createDownload({
       source: { url: `${FILEFLOW_BASE}/file/${this.#qrId}` },
       target: { path: targetPath },
-      contentType: blob.type,
+      contentType,
       succeeded: true,
     });
     const list = await lazy.Downloads.getList(lazy.Downloads.PUBLIC);
     await list.add(download);
     await download.refresh();
-  }
-
-  #extensionForType(type) {
-    try {
-      const mimeService = Cc["@mozilla.org/mime;1"].getService(
-        Ci.nsIMIMEService
-      );
-      const primary = mimeService.getFromTypeAndExtension(
-        type,
-        ""
-      ).primaryExtension;
-      if (primary) {
-        return `.${primary}`;
-      }
-    } catch (e) {
-      // Unknown content type; fall back to no extension.
-    }
-    return "";
   }
 
   // DownloadsData view callbacks. Download objects are mutated in place, so we
@@ -316,9 +321,7 @@ export class SidebarFiles extends SidebarPage {
   // dropping files onto the panel. Each item is shown as a thumbnail and can
   // be dragged back out to a web page or the OS.
   async onAddMedia() {
-    const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
-      Ci.nsIFilePicker
-    );
+    const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
     fp.init(
       this.topWindow.browsingContext,
       "Add media",
@@ -341,9 +344,7 @@ export class SidebarFiles extends SidebarPage {
   // has full filesystem access, so the only prompt is macOS's own (TCC) when a
   // protected location is first read.
   async onAddFolder() {
-    const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
-      Ci.nsIFilePicker
-    );
+    const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
     fp.init(
       this.topWindow.browsingContext,
       "Choose a media folder",
@@ -619,13 +620,14 @@ export class SidebarFiles extends SidebarPage {
               ></moz-button>
               ${when(
                 this.mediaItems.length,
-                () => html`<moz-button
-                  class="media-clear"
-                  type="ghost"
-                  iconSrc="chrome://global/skin/icons/delete.svg"
-                  data-l10n-id="sidebar-files-clear-media"
-                  @click=${() => this.onClearMedia()}
-                ></moz-button>`
+                () =>
+                  html`<moz-button
+                    class="media-clear"
+                    type="ghost"
+                    iconSrc="chrome://global/skin/icons/delete.svg"
+                    data-l10n-id="sidebar-files-clear-media"
+                    @click=${() => this.onClearMedia()}
+                  ></moz-button>`
               )}
             </div>
             ${this.mediaItems.length
@@ -641,12 +643,10 @@ export class SidebarFiles extends SidebarPage {
             ? html`<ul class="files-list">
                 ${this.fileItems.map(item => this.#rowTemplate(item))}
               </ul>`
-            : html`<fxview-empty-state
-                headerLabel="sidebar-files-empty-heading"
-                .descriptionLabels=${["sidebar-files-empty-description"]}
-                class="empty-state files"
-                isSelectedTab
-              ></fxview-empty-state>`}
+            : html`<div class="files-empty">
+                <h4 data-l10n-id="sidebar-files-empty-heading"></h4>
+                <p data-l10n-id="sidebar-files-empty-description"></p>
+              </div>`}
           <div class="qr-code-group">
             <h4
               class="files-qr-code-heading"
@@ -654,7 +654,7 @@ export class SidebarFiles extends SidebarPage {
             ></h4>
             <img
               class="sidebar-qr-code"
-              src=${this.#qrDataURI}
+              src=${this.qrDataURI}
               data-l10n-id="sidebar-files-qr-code"
             />
           </div>

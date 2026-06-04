@@ -7,8 +7,7 @@ const { FileTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/FileTestUtils.sys.mjs"
 );
 
-const QR_URL_REGEX =
-  /^https:\/\/fileflow\.harshitsohaney\.com\/[0-9a-f-]{36}$/;
+const QR_URL_REGEX = /^https:\/\/fileflow\.harshitsohaney\.com\/[0-9a-f-]{36}$/;
 
 add_setup(async () => {
   await SpecialPowers.pushPrefEnv({
@@ -175,7 +174,7 @@ add_task(async function test_list_updates_on_add_and_remove() {
   const component = await showFilesPanel();
   await waitForRowCount(component, 0);
 
-  const empty = component.shadowRoot.querySelector("fxview-empty-state");
+  const empty = component.shadowRoot.querySelector(".files-empty");
   Assert.ok(empty, "Empty state is shown when there are no downloads.");
 
   const list = await Downloads.getList(Downloads.PUBLIC);

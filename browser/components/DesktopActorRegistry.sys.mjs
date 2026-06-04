@@ -368,6 +368,19 @@ let JSWINDOWACTORS = {
     allFrames: true,
   },
 
+  FileFlow: {
+    parent: {
+      esModuleURI: "resource:///actors/FileFlowParent.sys.mjs",
+    },
+    child: {
+      esModuleURI: "resource:///actors/FileFlowChild.sys.mjs",
+      events: {
+        click: { capture: true },
+      },
+    },
+    allFrames: true,
+  },
+
   /* Note: this uses the same JSMs as ClickHandler, but because it
    * relies on "normal" click events anywhere on the page (not just
    * links) and is expensive, and only does something for the

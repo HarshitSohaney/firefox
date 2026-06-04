@@ -12,15 +12,17 @@
   display: flex;
   align-items: center;
   gap: var(--space-small);
-  padding-block: var(--space-xsmall);
+  padding-block: var(--space-small);
   padding-inline: var(--space-small);
   border-radius: var(--border-radius-small);
+  min-height: var(--size-item-xlarge);
 }
 
 .files-thumbnail {
   flex-shrink: 0;
-  /* The image is already downscaled so its longest side is 100px. */
-  block-size: auto;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
   border-radius: var(--border-radius-small);
 }
 
@@ -55,6 +57,21 @@
 
 .files-show-in-folder {
   flex-shrink: 0;
+}
+
+.files-empty {
+  text-align: center;
+  padding: var(--space-medium);
+  color: var(--text-color-deemphasized);
+}
+
+.files-empty h4 {
+  margin: 0;
+}
+
+.files-empty p {
+  margin-block: var(--space-xsmall) 0;
+  font-size: var(--font-size-small);
 }
 
 .qr-code-group {

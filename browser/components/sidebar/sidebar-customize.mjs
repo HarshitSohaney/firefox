@@ -23,6 +23,7 @@ const l10nMap = new Map([
   ["viewOpenTabsSidebar", "sidebar-menu-open-tabs-label"],
   ["viewCPMSidebar", "sidebar-menu-contextual-password-manager-label"],
 ]);
+
 const VISIBILITY_SETTING_PREF = "sidebar.visibility";
 const EXPAND_ON_HOVER_PREF = "sidebar.expandOnHover";
 const POSITION_SETTING_PREF = "sidebar.position_start";
