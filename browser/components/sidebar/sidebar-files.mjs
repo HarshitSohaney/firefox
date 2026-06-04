@@ -652,11 +652,18 @@ export class SidebarFiles extends SidebarPage {
               class="files-qr-code-heading"
               data-l10n-id="sidebar-files-qr-code-heading"
             ></h4>
-            <img
-              class="sidebar-qr-code"
-              src=${this.qrDataURI}
-              data-l10n-id="sidebar-files-qr-code"
-            />
+            <div class="qr-stack">
+              <img
+                class="qr-kit"
+                src="chrome://browser/content/sidebar/firefox-mascot.png"
+                role="presentation"
+              />
+              <img
+                class="sidebar-qr-code"
+                src=${this.qrDataURI}
+                data-l10n-id="sidebar-files-qr-code"
+              />
+            </div>
           </div>
         </div>
       </div>

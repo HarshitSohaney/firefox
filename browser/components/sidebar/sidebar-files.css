@@ -87,12 +87,27 @@
   font-weight: var(--font-weight-heading);
 }
 
+.qr-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.qr-kit {
+  display: block;
+  /* Sized a bit narrower than the QR; the stack has no gap so the kit's feet
+   * stay flush against the top edge of the QR code. */
+  /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
+  width: 120px;
+  height: auto;
+  pointer-events: none;
+}
+
 .sidebar-qr-code {
-  /* Fixed size keeps the QR code crisply scannable; no design token applies. */
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-  width: 160px;
+  width: 150px;
   /* stylelint-disable-next-line stylelint-plugin-mozilla/use-design-tokens */
-  height: 160px;
+  height: 150px;
   image-rendering: pixelated;
   background-color: white;
   border-radius: var(--border-radius-medium);

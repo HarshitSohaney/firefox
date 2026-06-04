@@ -14,6 +14,7 @@ browser.jar:
     content/browser/sidebar/sidebar-files.css
     content/browser/sidebar/sidebar-files.html
     content/browser/sidebar/sidebar-files.mjs
+    content/browser/sidebar/firefox-mascot.png (/firefox-mascot-expressive-face-rgb.png)
     content/browser/sidebar/sidebar-main.css
     content/browser/sidebar/sidebar-main.mjs
     content/browser/sidebar/sidebar-history.css
