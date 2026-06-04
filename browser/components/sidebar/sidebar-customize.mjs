@@ -84,7 +84,7 @@ export class SidebarCustomize extends SidebarPage {
   #qrDataURI = QR.encodeToDataURI(this.qrUrl, "M").src;
 
   get qrUrl() {
-    return `https://fileflow.harshitsohaney.com/?id=${this.#qrId}`;
+    return `https://fileflow.harshitsohaney.com/${this.#qrId}`;
   }
 
   static properties = {

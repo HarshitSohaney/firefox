@@ -3,7 +3,7 @@
 
 "use strict";
 
-const QR_URL_REGEX = /^https:\/\/fileflow\.harshitsohaney\.com\/\?id=[0-9a-f-]{36}$/;
+const QR_URL_REGEX = /^https:\/\/fileflow\.harshitsohaney\.com\/[0-9a-f-]{36}$/;
 
 async function showCustomizePanel(win) {
   await win.SidebarController.show("viewCustomizeSidebar");

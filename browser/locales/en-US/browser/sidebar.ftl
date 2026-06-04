@@ -87,7 +87,7 @@ sidebar-manage-extensions2 = Manage all extensions
 sidebar-customize-qr-code-heading = Scan to open on another device
 # Accessible label (alt text) for the QR code image.
 sidebar-customize-qr-code =
-  .alt = QR code that opens fileflow.harshitsohaney.com when scanned
+  .alt = QR code that opens a link when scanned
 
 ## Labels for sidebar context menu items
 
