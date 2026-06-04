@@ -602,7 +602,12 @@ export class SidebarFiles extends SidebarPage {
           view="viewFilesSidebar"
         ></sidebar-panel-header>
         <div class="sidebar-panel-scrollable-content">
-          <div class="media-group">
+          <section class="files-section">
+            <h4
+              class="files-section-heading"
+              data-l10n-id="sidebar-files-scrapbook-heading"
+            ></h4>
+            <div class="media-group">
             <div class="media-actions">
               <moz-button
                 class="media-add"
@@ -638,8 +643,14 @@ export class SidebarFiles extends SidebarPage {
                   class="media-hint"
                   data-l10n-id="sidebar-files-media-hint"
                 ></p>`}
-          </div>
-          <div class="downloads-group">
+            </div>
+          </section>
+          <section class="files-section">
+            <h4
+              class="files-section-heading"
+              data-l10n-id="sidebar-files-downloads-heading"
+            ></h4>
+            <div class="downloads-group">
             ${when(
               this.downloads.length,
               () =>
@@ -652,12 +663,14 @@ export class SidebarFiles extends SidebarPage {
                   data-l10n-id="sidebar-files-downloads-empty"
                 ></p>`
             )}
-          </div>
-          <div class="qr-code-group">
+            </div>
+          </section>
+          <section class="files-section">
             <h4
-              class="files-qr-code-heading"
-              data-l10n-id="sidebar-files-qr-code-heading"
+              class="files-section-heading"
+              data-l10n-id="sidebar-files-photoflow-heading"
             ></h4>
+            <div class="qr-code-group">
             <div class="qr-stack">
               <img
                 class="qr-kit"
@@ -670,7 +683,8 @@ export class SidebarFiles extends SidebarPage {
                 data-l10n-id="sidebar-files-qr-code"
               />
             </div>
-          </div>
+            </div>
+          </section>
         </div>
       </div>
     `;

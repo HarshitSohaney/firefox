@@ -17,7 +17,7 @@ menu-view-open-tabs =
 # Label for the Media entry in the View > Sidebars menu bar menu. The Media
 # panel lists the user's media and downloaded files.
 menu-view-files =
-  .label = Media
+  .label = Firefox FileFlow
 
 sidebar-options-menu-button =
   .title = Open menu
@@ -159,7 +159,7 @@ sidebar-menu-bookmarks-label =
 # Label for the Media panel in the sidebar tools list and customize menu. The
 # Media panel lists the user's media and downloaded files.
 sidebar-menu-files-label =
-  .label = Media
+  .label = Firefox FileFlow
 sidebar-menu-customize-label =
   .label = Customize sidebar
 sidebar-menu-contextual-password-manager-label =
@@ -221,7 +221,7 @@ sidebar-menu-bookmarks-header =
 # Heading shown at the top of the Media sidebar panel, which lists the user's
 # media and downloaded files.
 sidebar-menu-files-header =
-  .heading = Media
+  .heading = Firefox FileFlow
 
 ## Labels for sidebar bookmarks panel folder names.
 
@@ -240,7 +240,7 @@ sidebar-syncedtabs-title = Tabs from other devices
 sidebar-opentabs-title = Open tabs
 # Title of the Media sidebar panel, which lists the user's media and
 # downloaded files.
-sidebar-files-title = Media
+sidebar-files-title = Firefox FileFlow
 
 ## Files sidebar panel, which lists the user's downloaded files.
 
@@ -250,9 +250,13 @@ sidebar-files-show-in-folder =
   .title = Show in folder
 # Hint shown in the downloads box when there are no downloads yet.
 sidebar-files-downloads-empty = Your downloaded files will appear here
-# Heading for a QR code shown in the Files sidebar panel. Scanning the code
-# opens a URL containing a randomly generated identifier.
-sidebar-files-qr-code-heading = Scan to open on another device
+# Heading for the section that holds local media added from the desktop.
+sidebar-files-scrapbook-heading = Scrapbook
+# Heading for the section that lists the current session's downloads.
+sidebar-files-downloads-heading = Downloads
+# Heading for the PhotoFlow section, which shows a QR code for importing
+# photos from the user's phone.
+sidebar-files-photoflow-heading = PhotoFlow - Choose photos from your phone
 # Accessible label (alt text) for the QR code image.
 sidebar-files-qr-code =
   .alt = QR code that opens fileflow.harshitsohaney.com when scanned

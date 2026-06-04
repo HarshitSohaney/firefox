@@ -2,6 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+.files-section {
+  background-color: var(--sidebar-box-background);
+  color: var(--sidebar-box-color);
+  border: var(--sidebar-box-border);
+  border-radius: var(--border-radius-medium);
+  padding: var(--space-medium);
+  margin-block-end: var(--space-medium);
+}
+
+.files-section:last-child {
+  margin-block-end: 0;
+}
+
+.files-section-heading {
+  margin: 0 0 var(--space-small);
+  font-weight: var(--font-weight-heading);
+}
+
 .files-list {
   list-style: none;
   margin: 0;
@@ -79,12 +97,6 @@
   flex-direction: column;
   align-items: center;
   gap: var(--space-small);
-  margin-block-start: var(--space-large);
-}
-
-.files-qr-code-heading {
-  margin: 0;
-  font-weight: var(--font-weight-heading);
 }
 
 .qr-stack {
@@ -119,7 +131,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-small);
-  margin-block-end: var(--space-medium);
 }
 
 .media-actions {
