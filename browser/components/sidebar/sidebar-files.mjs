@@ -639,14 +639,20 @@ export class SidebarFiles extends SidebarPage {
                   data-l10n-id="sidebar-files-media-hint"
                 ></p>`}
           </div>
-          ${this.downloads.length
-            ? html`<ul class="files-list">
-                ${this.fileItems.map(item => this.#rowTemplate(item))}
-              </ul>`
-            : html`<div class="files-empty">
-                <h4 data-l10n-id="sidebar-files-empty-heading"></h4>
-                <p data-l10n-id="sidebar-files-empty-description"></p>
-              </div>`}
+          <div class="downloads-group">
+            ${when(
+              this.downloads.length,
+              () =>
+                html`<ul class="files-list">
+                  ${this.fileItems.map(item => this.#rowTemplate(item))}
+                </ul>`,
+              () =>
+                html`<p
+                  class="media-hint"
+                  data-l10n-id="sidebar-files-downloads-empty"
+                ></p>`
+            )}
+          </div>
           <div class="qr-code-group">
             <h4
               class="files-qr-code-heading"

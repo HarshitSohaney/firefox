@@ -114,7 +114,8 @@
   padding: var(--space-small);
 }
 
-.media-group {
+.media-group,
+.downloads-group {
   display: flex;
   flex-direction: column;
   gap: var(--space-small);
@@ -135,7 +136,7 @@
   padding: var(--space-medium);
   color: var(--text-color-deemphasized);
   font-size: var(--font-size-small);
-  text-align: center;
+  text-align: start;
   border: var(--border-width) dashed var(--border-color);
   border-radius: var(--border-radius-medium);
 }

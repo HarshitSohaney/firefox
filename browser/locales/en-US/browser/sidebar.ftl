@@ -247,10 +247,8 @@ sidebar-files-title = Files
 # folder in the operating system's file manager.
 sidebar-files-show-in-folder =
   .title = Show in folder
-# Heading shown when there are no downloads to display in the Files panel.
-sidebar-files-empty-heading = No downloads yet
-# Description shown when there are no downloads to display in the Files panel.
-sidebar-files-empty-description = Files you download will appear here.
+# Hint shown in the downloads box when there are no downloads yet.
+sidebar-files-downloads-empty = Your downloaded files will appear here
 # Heading for a QR code shown in the Files sidebar panel. Scanning the code
 # opens a URL containing a randomly generated identifier.
 sidebar-files-qr-code-heading = Scan to open on another device
